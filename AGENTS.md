@@ -1,0 +1,82 @@
+# AGENTS.md — futures-trading-client
+
+## Qué es este proyecto
+
+Cliente de escritorio Windows (C#) para trading de futuros. Es el reemplazo del proyecto legacy `Setup_Client` (WinForms, auditado y con deuda técnica severa — ver "Lecciones del proyecto anterior"). Responsabilidades:
+
+1. **UI de trading**: visualización de setups, gráficos, alertas, gestión de la operativa diaria.
+2. **Conexión directa a plataformas externas**: NinjaTrader (vía su SDK/DLL nativo) y ThinkorSwim (reemplazo de TradeStation) para datos de mercado en tiempo real y ejecución de órdenes.
+3. **Cálculo de negocio del lado del cliente**: riesgo/recompensa, tick values, lógica de setups — mientras no se decida mover esto a un servicio separado.
+4. **Consumo de `futures-trading-backend`** (API Python) para dos cosas puntuales: autenticación de usuario y persistencia de trades ejecutados.
+
+## Fuera de alcance para el backend Python (y por qué importa aquí)
+
+`futures-trading-backend` **no** habla con NinjaTrader/ThinkorSwim, **no** calcula riesgo/recompensa. Esas responsabilidades son de este cliente. Esto es una decisión de arquitectura explícita (latencia, y porque NinjaTrader/ThinkorSwim se integran vía SDKs nativos de Windows) — no delegar estas llamadas al backend "para simplificar", y no esperar que el backend valide o calcule nada de trading.
+
+## Stack
+
+- **UI**: WinForms — decisión tomada sobre WPF por continuidad con la intuición ganada en el proyecto legacy y porque el SDK/ATI de NinjaTrader está pensado para Windows clásico. El desafío de separación UI/lógica que WPF resuelve con data-binding se resuelve aquí con disciplina de Clean Architecture (ver abajo), no con el framework de UI.
+- **.NET**: .NET 8 (no repetir el .NET Framework legacy del proyecto anterior).
+- **HTTP hacia el backend**: `HttpClient` con `async`/`await` — nunca `HttpWebRequest` síncrono como en el legacy.
+- **DTOs del backend**: generados/alineados con el esquema OpenAPI que expone `futures-trading-backend` (fuente de verdad ahí, no redefinir el contrato manualmente en este repo).
+- **Integraciones externas**: SDK/DLL de NinjaTrader (ATI), API de ThinkorSwim — cada una encapsulada en su propio servicio/cliente con interfaz (para poder testear/mockear).
+
+## Arquitectura: Clean Architecture
+
+Solución dividida en proyectos por capa, con la regla de dependencia estricta: **las capas internas no conocen a las externas**.
+
+- **`Domain`**: entidades y reglas de negocio puras (Setup, Trade, Instrument, RiskRewardCalculator). Sin dependencias externas — nada de WinForms, nada de HTTP, nada de SDK de NinjaTrader. Es lo más parecido a "lo que no debe romperse nunca" del sistema.
+- **`Application`**: casos de uso/orquestación (ej. "abrir setup", "registrar trade ejecutado", "autenticar usuario"). Define interfaces (`INinjaTraderService`, `IThinkOrSwimService`, `IBackendApiClient`, `ITradeRepository`) que las capas externas implementan — Application depende de abstracciones, no de implementaciones concretas.
+- **`Infrastructure`**: implementaciones concretas de esas interfaces — el cliente HTTP real hacia `futures-trading-backend`, el wrapper real del SDK de NinjaTrader, el cliente real de ThinkorSwim.
+- **`UI` (WinForms)**: la capa más externa. Los formularios son "tontos": reciben eventos del usuario, llaman a un caso de uso de `Application`, y muestran el resultado. Nada de lógica de negocio ni llamadas de red directas en el code-behind.
+
+Esto es exactamente lo que faltó en el legacy: `Form1.cs`/`Form_Setup.cs` eran UI+Application+Infrastructure+Domain fusionados en una sola clase de miles de líneas.
+
+## Convenciones
+
+- **Separación de capas obligatoria desde el día uno** (ver Clean Architecture arriba) — ningún formulario contiene lógica de red o cálculo financiero en su code-behind.
+- **Dominio fuertemente tipado**: precios como `decimal`, fechas como `DateTime`, flags como `bool`/`enum` — nunca `string` para representar estos valores (ver lecciones abajo).
+- **Una sola fuente de verdad por cálculo de negocio** (risk/reward, tick value por instrumento) — vive en `Domain`, un único lugar, no una copia por formulario.
+- **Nada de credenciales/API keys en el código fuente** — usar `appsettings.json` + `dotnet user-secrets` en desarrollo, y una solución de configuración segura en producción (no commitear secretos).
+- **Todo `async` de extremo a extremo** para I/O (HTTP, brokers) — no bloquear el hilo de UI.
+- **Inyección de dependencias** (`Microsoft.Extensions.DependencyInjection`) para resolver las interfaces de `Application` con las implementaciones de `Infrastructure` — sin `new NinjaTraderClient()` disperso por los formularios como en el legacy.
+
+## Estrategia de testing
+
+Los 3 tipos de test, incorporados a medida que el sistema crezca (no todos de una vez) — mapeados a las capas de Clean Architecture:
+
+- **Unit tests** (`Domain.Tests`, `Application.Tests`): la prioridad más alta, porque cubren la lógica que estaba más rota en el legacy (risk/reward, tick values). `Domain` se testea sin mocks (es lógica pura). `Application` se testea mockeando las interfaces (`INinjaTraderService`, `IThinkOrSwimService`, `IBackendApiClient`, `ITradeRepository`) — nunca contra implementaciones reales. Framework: xUnit + (FluentAssertions/Moq o NSubstitute, a elegir cuando se escriba el primer test).
+- **Integration tests** (`Infrastructure.Tests`): validan que las implementaciones reales de `Infrastructure` funcionan contra sus dependencias externas reales — el cliente HTTP contra una instancia real de `futures-trading-backend` (local o en Docker en Fase 2), y el wrapper de NinjaTrader/ThinkorSwim contra su SDK/API real cuando haya un entorno disponible para eso (si no lo hay en CI, usar test doubles ahí y reservar estas pruebas para ejecución manual/local).
+- **E2E tests** (`E2E.Tests`): sobre la aplicación completa, incluida la UI WinForms, con **FlaUI** (o WinAppDriver como alternativa) para automatizar vía UI Automation de Windows. Es la capa más cara de mantener — reservarla para los flujos críticos de punta a punta (ej. login → crear setup → ver alerta), no para cubrir cada pantalla.
+
+Regla general: no escribir tests de una capa que aún no existe. Cada vez que se agregue una entidad/caso de uso/servicio nuevo, su test correspondiente se agrega en el mismo cambio, no después.
+
+## Lecciones del proyecto anterior (Setup_Client) — no repetir
+
+Auditoría completa disponible; estas son restricciones activas, no solo historia:
+
+- **God Forms**: `Form1.cs` llegó a 19,075 líneas y `Form_Setup.cs` a 12,892, mezclando UI + red + cálculo + archivos + integración con broker en una sola clase. Aquí: un formulario no debe superar unos pocos cientos de líneas; toda lógica no-UI va a un servicio.
+- **Secretos hardcodeados**: API keys de OANDA, client_secret y refresh token de TradeStation quedaron en texto plano en el código, extraíbles por decompilación. Aquí: nunca.
+- **Identidad hardcodeada**: varios formularios fijaban `Userid="aldorat"; Role="Admin"` como atajo, bypasseando la autenticación real. Aquí: siempre usar la sesión autenticada real contra el backend.
+- **Login inseguro**: password enviado por query string en un GET, comparado en texto plano, y un botón que sobreescribía el campo de password con el literal `"robert"`. Aquí: el flujo de auth contra `futures-trading-backend` usa POST + HTTPS (aunque sea local) + hashing del lado del servidor.
+- **Cálculo financiero duplicado y divergente**: la fórmula de riesgo/recompensa y las tablas de tick-value por instrumento se reimplementaron 6+ veces con valores ya inconsistentes entre copias. Aquí: un único `RiskRewardCalculator`/`InstrumentSpecs` compartido.
+- **Contratos de futuros y cuentas de broker hardcodeados** (ej. `"CL 04-24"`, cuentas reales en texto plano) — se rompen cada vencimiento y exponen datos operativos. Aquí: configuración externa, no literales en código.
+- **Hilos crudos con `Thread.Sleep`/`Thread.Abort()`** para polling, sin cancelación, causando fugas y condiciones de carrera con la UI. Aquí: `async`/`await` con `CancellationToken`, o `System.Threading.Timer`.
+- **Fugas de recursos GDI** (`Font`, `Bitmap`, `Graphics`, `Image` sin `Dispose`) por una app pensada para correr toda la sesión de trading. Aquí: `using`/`IDisposable` disciplinado en todo lo gráfico.
+
+## Estado actual
+
+**Login funcional de punta a punta (verificado 2026-09-11)**, contra el backend real corriendo en local.
+
+Solución `FuturesTrading.sln` en `src/` y `tests/`:
+- `FuturesTrading.Domain` — `AuthenticatedUser`.
+- `FuturesTrading.Application` — `IAuthService`, `AuthResult` (`Auth/`).
+- `FuturesTrading.Infrastructure` — `BackendApiClient` (implementa `IAuthService` con `HttpClient`, habla `POST auth/login` form-urlencoded contra el backend, mapea 401 → mensaje de credenciales inválidas, `HttpRequestException` → mensaje de conexión), `ApiSettings`.
+- `FuturesTrading.UI` — `LoginForm` (formulario "tonto", UI construida en código sin `.Designer.cs` separado por simplicidad en esta fase), `MainForm` (placeholder post-login), `Program.cs` con DI (`ServiceCollection` + `IConfiguration` desde `appsettings.json`, `AddHttpClient<IAuthService, BackendApiClient>()`).
+- `FuturesTrading.Application.Tests` (xUnit) — tests de `AuthResult` y del contrato de `IAuthService` con un doble de prueba (`FakeAuthService`); 4/4 pasando.
+
+Notas de implementación:
+- `Application.Run(...)` colisiona por nombre con el namespace `FuturesTrading.Application` — se resolvió con un alias `using WinFormsApplication = System.Windows.Forms.Application;` en `Program.cs`. Tenerlo en cuenta en cualquier archivo de `UI` que use la clase `Application` de WinForms.
+- El login del backend usa `OAuth2PasswordRequestForm` (form-urlencoded), no JSON — `BackendApiClient` envía `FormUrlEncodedContent`, no `PostAsJsonAsync`.
+
+Próximos pasos: el modelo de dominio de `Setup`/`Trade` y la integración con NinjaTrader/ThinkorSwim quedan para iteraciones futuras (decisión explícita de enfocar primero solo en login).

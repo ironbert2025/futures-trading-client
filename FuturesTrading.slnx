@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FuturesTrading.Application/FuturesTrading.Application.csproj" />
+    <Project Path="src/FuturesTrading.Domain/FuturesTrading.Domain.csproj" />
+    <Project Path="src/FuturesTrading.Infrastructure/FuturesTrading.Infrastructure.csproj" />
+    <Project Path="src/FuturesTrading.UI/FuturesTrading.UI.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FuturesTrading.Application.Tests/FuturesTrading.Application.Tests.csproj" />
+  </Folder>
+</Solution>

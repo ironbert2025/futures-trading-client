@@ -1,0 +1,16 @@
+## .NET
+bin/
+obj/
+*.user
+
+## Visual Studio
+.vs/
+*.suo
+
+## Rider / VS Code
+.idea/
+.vscode/
+
+## Test results
+TestResults/
+*.trx
