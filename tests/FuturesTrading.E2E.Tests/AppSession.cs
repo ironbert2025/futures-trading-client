@@ -19,12 +19,37 @@ public sealed class AppSession : IDisposable
 
     public Window LoginWindow { get; }
 
-    public AppSession()
+    /// <param name="apiBaseUrl">
+    /// Si se indica, la app arranca con Api__BaseUrl apuntando ahí (backend falso). Si no, usa el
+    /// appsettings.json (backend real en localhost:8000).
+    /// </param>
+    public AppSession(string? apiBaseUrl = null)
     {
-        _app = Application.Launch(FindExecutablePath());
+        var startInfo = new System.Diagnostics.ProcessStartInfo(FindExecutablePath())
+        {
+            UseShellExecute = false,
+        };
+
+        if (apiBaseUrl is not null)
+        {
+            startInfo.Environment["Api__BaseUrl"] = apiBaseUrl;
+        }
+
+        _app = Application.Launch(startInfo);
         LoginWindow = _app.GetMainWindow(_automation, DefaultTimeout)
             ?? throw new InvalidOperationException("No apareció la ventana de login.");
     }
+
+    public bool IsEnabled(string automationId)
+    {
+        var element = LoginWindow.FindFirstDescendant(cf => cf.ByAutomationId(automationId))
+            ?? throw new InvalidOperationException($"No se encontró el control '{automationId}'.");
+        return element.IsEnabled;
+    }
+
+    /// <summary>Espera a que el proceso de la app termine por sí solo.</summary>
+    public bool WaitForExit(TimeSpan timeout) =>
+        Retry.WhileFalse(() => _app.HasExited, timeout, TimeSpan.FromMilliseconds(200)).Success;
 
     public void TypeInto(string automationId, string text)
     {
@@ -69,7 +94,10 @@ public sealed class AppSession : IDisposable
     {
         try
         {
-            _app.Kill();
+            if (!_app.HasExited)
+            {
+                _app.Kill();
+            }
         }
         finally
         {

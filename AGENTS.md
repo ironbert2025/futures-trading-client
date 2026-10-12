@@ -17,7 +17,7 @@ Todo cambio de comportamiento parte de una spec en `specs/NNNN-<nombre>/` (`spec
 - **El contrato HTTP lo posee el backend.** Las specs de este repo lo referencian (`futures-trading-backend/specs/...`) y no lo copian.
 - Cada AC se verifica en el nivel más barato posible: unit (`Domain`/`Application`), integración (`Infrastructure`), E2E solo para flujos críticos.
 - Antes de implementar una feature nueva, leer su spec; si no existe, escribirla y pedir aprobación.
-- Estado: `0001-auth-login` es retroactiva y tiene 12 tests (2 unit, 7 integración, 3 E2E). Brecha abierta en su `tasks.md` (T8): no se prueba que la *ventana* muestre los errores ni que deshabilite el botón.
+- Estado: `0001-auth-login` es retroactiva y tiene 17 tests (2 unit, 7 integración, 8 E2E), con los 9 AC cubiertos. Límite documentado: el timeout (AC-7) solo se prueba en integración.
 
 ### Tests
 
@@ -102,7 +102,12 @@ Notas de implementación:
 
 ### Tests E2E (FlaUI) — `tests/FuturesTrading.E2E.Tests`
 
-Lanzan la app WinForms **real** (el `.exe` Debug ya compilado), la manejan por UI Automation con FlaUI (`FlaUI.UIA3`) y la prueban contra el backend real. Cubren el login: arranque (AC-1, no necesita backend), credenciales válidas → ventana principal "Bienvenido, {usuario}" (AC-2) y password incorrecta → mensaje de error y se queda en el login (AC-3). 3/3 pasando (2026-10-12).
+Lanzan la app WinForms **real** (el `.exe` Debug ya compilado), la manejan por UI Automation con FlaUI (`FlaUI.UIA3`) y la prueban en dos modos (8 tests, pasando 2026-10-12):
+
+- **Contra el backend real** (`LoginFlowTests`): arranque (AC-1, no necesita backend), credenciales válidas → ventana principal (AC-2), password incorrecta → error y se queda en el login (AC-3).
+- **Contra un backend falso en proceso** (`LoginWindowBehaviorTests`, `FakeBackend`): servidor caído (AC-4), botón deshabilitado y UI que responde mientras la petición está en vuelo (AC-5), `500` (AC-7), `200` sin token (AC-9), y cierre de la principal que termina la app (AC-8). No necesitan backend ni credenciales.
+
+El segundo modo funciona porque `Program.cs` lee también **variables de entorno**: `Api__BaseUrl` sobrescribe el `BaseUrl` de `appsettings.json`. `AppSession(apiBaseUrl)` lanza la app con esa variable. Sin variable, manda el archivo (comportamiento normal).
 
 Cómo correrlos:
 
@@ -117,6 +122,9 @@ Detalles a recordar:
 - El proyecto apunta a `net8.0-windows` y referencia la UI con `ReferenceOutputAssembly="false"` solo para que se compile antes; ubica el `.exe` subiendo hasta `FuturesTrading.slnx` y bajando a `src/FuturesTrading.UI/bin/Debug/net8.0-windows/`. Solo funciona con la configuración **Debug**.
 - Los controles se encuentran por `AutomationId`, que en WinForms es `Control.Name`. **Todo control que un test E2E necesite debe tener `Name` asignado** (`txtUsername`, `txtPassword`, `btnLogin`, `lblError`, `lblWelcome`). Un control con `Visible = false` no existe en el árbol de UI Automation hasta que se muestra.
 - No correr los E2E con la app abierta a mano: el build bloquea el `.exe` y los tests lanzan su propia instancia (cada test mata la suya en `Dispose`).
-- Dependen de servicios externos (backend + BD), por eso son los más lentos y frágiles de la pirámide: reservarlos para flujos críticos y no incluirlos en un pipeline de CI sin levantar antes el backend.
+- Los E2E contra el backend real dependen de servicios externos (backend + BD): son los más lentos y frágiles; no incluirlos en un pipeline de CI sin levantar antes el backend. Los de backend falso no tienen esa dependencia.
+- **Corren estrictamente en serie** (`DisableTestParallelization` en `AssemblyConfig.cs`): manejan el teclado y el foco reales de Windows; dos a la vez escribirían en la ventana equivocada. **No usar el equipo mientras se ejecutan** (el teclado y el foco son los suyos).
+- El timeout de `HttpClient` (100 s) no se espera en un E2E: AC-7 por timeout solo se verifica en `Infrastructure.Tests`.
+- `FakeBackend` usa `HttpListener` sobre `localhost` con un puerto libre; no requiere permisos de administrador.
 
 Próximos pasos: el modelo de dominio de `Setup`/`Trade` y la integración con NinjaTrader/ThinkorSwim quedan para iteraciones futuras (decisión explícita de enfocar primero solo en login).

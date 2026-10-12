@@ -16,6 +16,7 @@ Clean Architecture con la regla de dependencia hacia adentro. El formulario no c
 | `AuthResult` (éxito/fallo) en vez de excepciones hacia la UI | Propagar `HttpRequestException` | La UI solo decide qué mostrar; los fallos de red se convierten en mensaje en `Infrastructure` |
 | Formularios con UI construida en código, sin `.Designer.cs` | Diseñador de VS | Simplicidad en esta fase; los controles llevan `Name` para UI Automation |
 | `BaseUrl` en `appsettings.json` | Valor en código | Cambiable sin recompilar; ambos modos del backend usan `:8000` |
+| La configuración también lee **variables de entorno** (`Api__BaseUrl` sobrescribe `Api:BaseUrl`) — *T8, aprobado 2026-10-12* | Constante de compilación para tests; archivo de config alterno | Permite a los E2E apuntar la app real a un backend falso y controlable (lento, caído, `500`) sin tocar `appsettings.json`. Sin efecto en el uso normal: si la variable no existe, manda el archivo |
 
 ## Capas / archivos afectados
 
