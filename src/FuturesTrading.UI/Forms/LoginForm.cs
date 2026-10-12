@@ -29,6 +29,12 @@ public sealed class LoginForm : Form
         MaximizeBox = false;
         ClientSize = new Size(320, 180);
 
+        // Control.Name se expone como AutomationId (UI Automation), usado por los tests E2E.
+        _txtUsername.Name = "txtUsername";
+        _txtPassword.Name = "txtPassword";
+        _btnLogin.Name = "btnLogin";
+        _lblError.Name = "lblError";
+
         var lblUsername = new Label { Text = "Usuario:", Location = new Point(20, 20), AutoSize = true };
         _txtUsername.Location = new Point(110, 17);
         _txtUsername.Width = 180;

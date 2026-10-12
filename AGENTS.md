@@ -79,4 +79,23 @@ Notas de implementación:
 - `Application.Run(...)` colisiona por nombre con el namespace `FuturesTrading.Application` — se resolvió con un alias `using WinFormsApplication = System.Windows.Forms.Application;` en `Program.cs`. Tenerlo en cuenta en cualquier archivo de `UI` que use la clase `Application` de WinForms.
 - El login del backend usa `OAuth2PasswordRequestForm` (form-urlencoded), no JSON — `BackendApiClient` envía `FormUrlEncodedContent`, no `PostAsJsonAsync`.
 
+### Tests E2E (FlaUI) — `tests/FuturesTrading.E2E.Tests`
+
+Lanzan la app WinForms **real** (el `.exe` Debug ya compilado), la manejan por UI Automation con FlaUI (`FlaUI.UIA3`) y la prueban contra el backend real. Cubren el login: credenciales válidas → ventana principal "Bienvenido, {usuario}"; password incorrecta → mensaje de error y se queda en el login. 2/2 pasando (2026-10-12).
+
+Cómo correrlos:
+
+1. Tener el backend levantado en `http://localhost:8000` (uvicorn local o `docker compose`) y un usuario ya registrado.
+2. Pasar las credenciales **solo por variables de entorno** (nunca en archivos del repo):
+
+```bash
+E2E_USERNAME=<usuario> E2E_PASSWORD=<password> dotnet test tests/FuturesTrading.E2E.Tests
+```
+
+Detalles a recordar:
+- El proyecto apunta a `net8.0-windows` y referencia la UI con `ReferenceOutputAssembly="false"` solo para que se compile antes; ubica el `.exe` subiendo hasta `FuturesTrading.slnx` y bajando a `src/FuturesTrading.UI/bin/Debug/net8.0-windows/`. Solo funciona con la configuración **Debug**.
+- Los controles se encuentran por `AutomationId`, que en WinForms es `Control.Name`. **Todo control que un test E2E necesite debe tener `Name` asignado** (`txtUsername`, `txtPassword`, `btnLogin`, `lblError`, `lblWelcome`). Un control con `Visible = false` no existe en el árbol de UI Automation hasta que se muestra.
+- No correr los E2E con la app abierta a mano: el build bloquea el `.exe` y los tests lanzan su propia instancia (cada test mata la suya en `Dispose`).
+- Dependen de servicios externos (backend + BD), por eso son los más lentos y frágiles de la pirámide: reservarlos para flujos críticos y no incluirlos en un pipeline de CI sin levantar antes el backend.
+
 Próximos pasos: el modelo de dominio de `Setup`/`Trade` y la integración con NinjaTrader/ThinkorSwim quedan para iteraciones futuras (decisión explícita de enfocar primero solo en login).

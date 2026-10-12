@@ -17,6 +17,7 @@ public sealed class MainForm : Form
 
         var label = new Label
         {
+            Name = "lblWelcome",
             Text = $"Bienvenido, {user.Username}",
             AutoSize = true,
             Location = new Point(20, 20),
