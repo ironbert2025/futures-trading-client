@@ -18,14 +18,19 @@ El trader debe identificarse antes de usar la aplicación. La ventana de login c
 
 | ID | Dado / Cuando / Entonces | Verificación |
 |---|---|---|
-| AC-1 | **Dado** que se inicia la aplicación, **entonces** se muestra la ventana "Futures Trading — Ingresar" con campos Usuario y Password (enmascarado) y el botón Ingresar. | E2E (solo comprueba el título); campos y enmascarado sin verificar |
-| AC-2 | **Dado** credenciales válidas, **cuando** se pulsa Ingresar, **entonces** se abre la ventana principal con "Bienvenido, {usuario}" y la de login se oculta. | E2E · `Login_WithValidCredentials_ShowsMainWindowWithWelcome` |
-| AC-3 | **Dado** credenciales inválidas (el backend responde `401`), **cuando** se pulsa Ingresar, **entonces** se muestra "Usuario o contraseña incorrectos." y la aplicación permanece en el login. | E2E · `Login_WithWrongPassword_ShowsErrorAndStaysOnLogin` |
-| AC-4 | **Dado** que el backend no es alcanzable, **cuando** se pulsa Ingresar, **entonces** se muestra "No se pudo conectar con el servidor. Verifique que la API esté corriendo." sin excepción sin manejar. | Sin verificar |
+| AC-1 | **Dado** que se inicia la aplicación, **entonces** se muestra la ventana "Futures Trading — Ingresar" con campos Usuario y Password (enmascarado) y el botón Ingresar. | E2E · `Ac1_Startup_ShowsLoginWindowWithMaskedPasswordAndLoginButton` (título, los tres controles, password enmascarado; no necesita backend) |
+| AC-2 | **Dado** credenciales válidas, **cuando** se pulsa Ingresar, **entonces** se abre la ventana principal con "Bienvenido, {usuario}" y la de login se oculta. | Integración · `Ac2_Success_*` (`BackendApiClient` devuelve usuario y token) · E2E · `Ac2_Login_WithValidCredentials_*` · Unit · `Ac2_Ok_*` |
+| AC-3 | **Dado** credenciales inválidas (el backend responde `401`), **cuando** se pulsa Ingresar, **entonces** se muestra "Usuario o contraseña incorrectos." y la aplicación permanece en el login. | Integración · `Ac3_Unauthorized_*` · E2E · `Ac3_Login_WithWrongPassword_*` · Unit · `Ac3_Fail_*` |
+| AC-4 | **Dado** que el backend no es alcanzable, **cuando** se pulsa Ingresar, **entonces** se muestra "No se pudo conectar con el servidor. Verifique que la API esté corriendo." sin excepción sin manejar. | Integración · `Ac4_Unreachable_*` (el cliente devuelve el mensaje en vez de lanzar). Que la **ventana** lo muestre: sin verificar (T8) |
 | AC-5 | **Dado** que hay un intento de login en curso, **entonces** el botón Ingresar queda deshabilitado, la interfaz no se bloquea, y se rehabilita al terminar (éxito o error). | Sin verificar |
-| AC-6 | **Dado** cualquier intento de login, **entonces** la contraseña viaja en el cuerpo de un `POST` (form-urlencoded), **nunca** en la URL. | Revisión de código; sin test automatizado |
-| AC-7 | **Dado** que el backend responde con un error del servidor (`5xx`) o tarda demasiado, **entonces** se muestra un mensaje genérico con el código o de "tardó demasiado", sin cerrar la aplicación. | Sin verificar |
+| AC-6 | **Dado** cualquier intento de login, **entonces** la contraseña viaja en el cuerpo de un `POST` (form-urlencoded), **nunca** en la URL. | Integración · `Ac6_SendsPostWithFormBodyAndNeverPutsThePasswordInTheUrl` (método, URL, content-type y cuerpo reales) |
+| AC-7 | **Dado** que el backend responde con un error del servidor (`5xx`) o tarda demasiado, **entonces** se muestra un mensaje genérico con el código o de "tardó demasiado", sin cerrar la aplicación. | Integración · `Ac7_ServerError_*` y `Ac7_Timeout_*` (mensajes exactos). Que la **ventana** lo muestre y siga abierta: sin verificar (T8) |
 | AC-8 | **Dado** que se cierra la ventana principal, **entonces** la aplicación termina por completo (no queda el login oculto en segundo plano). | E2E lo ejerce indirectamente (`Dispose` mata el proceso); sin aserción propia |
+| AC-9 | **Dado** que el backend responde `200` pero sin un token utilizable, **cuando** se pulsa Ingresar, **entonces** se muestra "Respuesta inválida del servidor." y no se abre la ventana principal. *(Agregado al escribir los tests de `BackendApiClient`: el comportamiento ya existía en el código.)* | Integración · `Ac9_OkWithoutAToken_*` |
+
+> Niveles: **Unit** `tests/FuturesTrading.Application.Tests` · **Integración** `tests/FuturesTrading.Infrastructure.Tests` (`HttpMessageHandler` falso, sin red) · **E2E** `tests/FuturesTrading.E2E.Tests` (UI real + backend real). Los tests llevan el `AC-n` en el nombre.
+>
+> **Brecha que queda:** los criterios AC-4, AC-5, AC-7 y AC-9 describen lo que el *usuario ve*, pero solo está verificado que `BackendApiClient` produce el resultado correcto; no hay una prueba de que `LoginForm` lo muestre, deshabilite el botón (AC-5) o siga abierto. Ver T8.
 
 ## Fuera de alcance
 

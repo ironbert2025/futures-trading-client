@@ -21,4 +21,4 @@ Reglas:
 
 | Spec | Título | Estado | Cobertura de AC |
 |---|---|---|---|
-| [0001-auth-login](0001-auth-login/spec.md) | Ventana de login | Implementada (retroactiva) | 8 AC: 2 con E2E, 1 parcial, 1 por revisión de código, 1 indirecto, **3 sin verificar** |
+| [0001-auth-login](0001-auth-login/spec.md) | Ventana de login | Implementada (retroactiva) | 9 AC, 12 tests (2 unit, 7 integración, 3 E2E): 7 con test automatizado, AC-8 solo indirecto, **AC-5 sin ninguno**. AC-4/7/9 se prueban en `BackendApiClient`, no en la ventana — T8 |

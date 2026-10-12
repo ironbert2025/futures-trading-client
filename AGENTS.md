@@ -17,7 +17,18 @@ Todo cambio de comportamiento parte de una spec en `specs/NNNN-<nombre>/` (`spec
 - **El contrato HTTP lo posee el backend.** Las specs de este repo lo referencian (`futures-trading-backend/specs/...`) y no lo copian.
 - Cada AC se verifica en el nivel más barato posible: unit (`Domain`/`Application`), integración (`Infrastructure`), E2E solo para flujos críticos.
 - Antes de implementar una feature nueva, leer su spec; si no existe, escribirla y pedir aprobación.
-- Estado de partida: `0001-auth-login` es retroactiva y lista las brechas de verificación en su `tasks.md` (no hay tests de integración).
+- Estado: `0001-auth-login` es retroactiva y tiene 12 tests (2 unit, 7 integración, 3 E2E). Brecha abierta en su `tasks.md` (T8): no se prueba que la *ventana* muestre los errores ni que deshabilite el botón.
+
+### Tests
+
+```bash
+dotnet test FuturesTrading.slnx                       # todo; los E2E requieren backend vivo y E2E_USERNAME/E2E_PASSWORD
+dotnet test tests/FuturesTrading.Infrastructure.Tests # integración: sin red, sin backend
+dotnet test tests/FuturesTrading.Application.Tests    # unit
+```
+
+- `Infrastructure.Tests` prueba `BackendApiClient` con un `HttpMessageHandler` falso: verifica lo que el cliente **envía** y cómo traduce cada respuesta. El handler captura la petición **dentro** de `SendAsync` (después `HttpClient` puede liberarla).
+- Nombrar cada test con su `AC-n` (`Ac3_Unauthorized_...`). Un criterio nuevo nace con su test en el mismo cambio.
 
 ## Fuera de alcance para el backend Python (y por qué importa aquí)
 
@@ -91,7 +102,7 @@ Notas de implementación:
 
 ### Tests E2E (FlaUI) — `tests/FuturesTrading.E2E.Tests`
 
-Lanzan la app WinForms **real** (el `.exe` Debug ya compilado), la manejan por UI Automation con FlaUI (`FlaUI.UIA3`) y la prueban contra el backend real. Cubren el login: credenciales válidas → ventana principal "Bienvenido, {usuario}"; password incorrecta → mensaje de error y se queda en el login. 2/2 pasando (2026-10-12).
+Lanzan la app WinForms **real** (el `.exe` Debug ya compilado), la manejan por UI Automation con FlaUI (`FlaUI.UIA3`) y la prueban contra el backend real. Cubren el login: arranque (AC-1, no necesita backend), credenciales válidas → ventana principal "Bienvenido, {usuario}" (AC-2) y password incorrecta → mensaje de error y se queda en el login (AC-3). 3/3 pasando (2026-10-12).
 
 Cómo correrlos:
 

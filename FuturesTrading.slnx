@@ -8,5 +8,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/FuturesTrading.Application.Tests/FuturesTrading.Application.Tests.csproj" />
     <Project Path="tests/FuturesTrading.E2E.Tests/FuturesTrading.E2E.Tests.csproj" />
+    <Project Path="tests/FuturesTrading.Infrastructure.Tests/FuturesTrading.Infrastructure.Tests.csproj" />
   </Folder>
 </Solution>
