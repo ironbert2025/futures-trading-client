@@ -9,6 +9,16 @@ Cliente de escritorio Windows (C#) para trading de futuros. Es el reemplazo del 
 3. **Cálculo de negocio del lado del cliente**: riesgo/recompensa, tick values, lógica de setups — mientras no se decida mover esto a un servicio separado.
 4. **Consumo de `futures-trading-backend`** (API Python) para dos cosas puntuales: autenticación de usuario y persistencia de trades ejecutados.
 
+## Flujo de desarrollo: SDD (specs primero)
+
+Todo cambio de comportamiento parte de una spec en `specs/NNNN-<nombre>/` (`spec.md` → `plan.md` → `tasks.md`), aprobada por el usuario **antes** de escribir código. Los criterios de aceptación tienen ID (`AC-n`) y cada test lo lleva en su nombre. Si el comportamiento cambia, la spec cambia primero.
+
+- Flujo, reglas e índice de specs: [`specs/README.md`](specs/README.md). Plantillas en `specs/_template/` (copia de las del backend; mantenerlas iguales).
+- **El contrato HTTP lo posee el backend.** Las specs de este repo lo referencian (`futures-trading-backend/specs/...`) y no lo copian.
+- Cada AC se verifica en el nivel más barato posible: unit (`Domain`/`Application`), integración (`Infrastructure`), E2E solo para flujos críticos.
+- Antes de implementar una feature nueva, leer su spec; si no existe, escribirla y pedir aprobación.
+- Estado de partida: `0001-auth-login` es retroactiva y lista las brechas de verificación en su `tasks.md` (no hay tests de integración).
+
 ## Fuera de alcance para el backend Python (y por qué importa aquí)
 
 `futures-trading-backend` **no** habla con NinjaTrader/ThinkorSwim, **no** calcula riesgo/recompensa. Esas responsabilidades son de este cliente. Esto es una decisión de arquitectura explícita (latencia, y porque NinjaTrader/ThinkorSwim se integran vía SDKs nativos de Windows) — no delegar estas llamadas al backend "para simplificar", y no esperar que el backend valide o calcule nada de trading.
