@@ -57,7 +57,17 @@
     }
 
     // Crea la vela si su tiempo es nuevo, o actualiza la que está en formación si es el mismo.
+    // Última vela y cantidad de velas cargadas: permiten dibujar a la derecha de la última vela
+    // (donde el gráfico no tiene datos) extrapolando el tiempo en pasos de una vela.
+    const BAR_SECONDS = 15 * 60;
+    let lastBarTime = null;
+    let barCount = 0;
+
     function upsertCandle(candle) {
+      if (lastBarTime === null || candle.time > lastBarTime) {
+        lastBarTime = candle.time;
+        barCount += 1;
+      }
       series.update(candle);
     }
 
@@ -71,6 +81,8 @@
     function loadHistory(candles) {
       series.setData(candles);
       firstBarTime = candles.length > 0 ? candles[0].time : null;
+      lastBarTime = candles.length > 0 ? candles[candles.length - 1].time : null;
+      barCount = candles.length;
       const count = candles.length;
       if (count > VISIBLE_BARS) {
         chart.timeScale().setVisibleLogicalRange({ from: count - VISIBLE_BARS, to: count + 6 });
@@ -89,9 +101,14 @@
     const DEMAND_COLOR = '#26a69a';
     const SUPPLY_COLOR = '#ef5350';
 
-    let dzSzArmed = false;
-    let dzSzPending = null;   // zona con la línea de Demanda ya dibujada, esperando la de Supply
-    const zones = [];         // [{ demand: {time, price}, supply: {time, price} | null, labels: [] }]
+    // Risk:Reward: dos líneas grises discontinuas de largo FIJO (en px de pantalla) entre el click 1
+    // y el 2, con el riesgo en USD a su derecha. Comparte con DZ/SZ la selección, borrado y guardado.
+    const RR_COLOR = '#9598a1';
+    const RR_LENGTH_PX = 30;
+
+    let armedKind = null;     // modo de dibujo activo: 'dzsz' | 'rr' | null (desarmado)
+    let dzSzPending = null;   // zona con el 1er click ya dibujado, esperando el 2º (de cualquier tipo)
+    const zones = [];         // [{ kind, demand: {time, price}, supply: {time, price} | null, labels: [] }]
     let zonesAttached = false;
     let selectedZone = null;  // zona elegida con un click (con el modo DZ/SZ desarmado)
 
@@ -104,6 +121,12 @@
     // Una zona guardada puede haber nacido antes de la primera vela que el hub entrega hoy: en ese
     // caso se dibuja desde el borde izquierdo en vez de desaparecer.
     function xOf(timeScale, time) {
+      // A la derecha de la última vela no hay barras: se ubica por índice lógico (una vela = 15 min).
+      if (lastBarTime != null && time > lastBarTime) {
+        const logical = (barCount - 1) + (time - lastBarTime) / BAR_SECONDS;
+        try { return timeScale.logicalToCoordinate(logical); } catch { return null; }
+      }
+
       const x = safeTimeToCoordinate(timeScale, time);
       if (x != null) return x;
       if (firstBarTime != null && time < firstBarTime) return 0;
@@ -113,6 +136,99 @@
     // Las primitivas no se repintan solas al cambiar sus datos: este cambio de opciones vacío lo fuerza.
     function forceRepaint() {
       series.applyOptions({});
+    }
+
+    // Valor en USD (1 contrato) entre las dos líneas: ticks x tick value. null si no hay datos.
+    function zoneValueText(zone, multiple = 1) {
+      if (!zone.supply || !(tickSize > 0) || !(tickValue > 0)) return null;
+      const ticks = Math.round(Math.abs(zone.supply.price - zone.demand.price) / tickSize);
+      return String(Number((ticks * multiple * tickValue).toFixed(2)));
+    }
+
+    const RR_TARGET_MULTIPLES = [1, 2, 3];
+
+    // Precios de las líneas de objetivo de Risk:Reward: 1x, 2x y 3x el riesgo medido desde la línea 1,
+    // hacia el lado contrario al del dibujo. dir = -1 (hacia abajo) si se dibujó de abajo hacia arriba.
+    function rrTargets(zone) {
+      if (!zone.supply) return [];
+      const risk = Math.abs(zone.supply.price - zone.demand.price);
+      const dir = zone.supply.price > zone.demand.price ? -1 : 1;
+      return RR_TARGET_MULTIPLES.map(multiple => ({
+        multiple, dir, price: zone.demand.price + dir * multiple * risk,
+      }));
+    }
+
+    // Posición X de un valor junto a las líneas: a la derecha si cabe en el panel; si no (zona
+    // dibujada cerca del borde derecho), a la izquierda para que no quede recortado.
+    function labelX(ctx, text, left, right, hRatio) {
+      const fits = right + 6 * hRatio + ctx.measureText(text).width <= ctx.canvas.width;
+      ctx.textAlign = fits ? 'left' : 'right';
+      return fits ? right + 6 * hRatio : left - 6 * hRatio;
+    }
+
+    function drawRiskReward(ctx, zone, x0, yd, selected, hRatio, vRatio) {
+      const ys = zone.supply ? series.priceToCoordinate(zone.supply.price) : null;
+      const left = x0 * hRatio;
+      const right = (x0 + RR_LENGTH_PX) * hRatio;
+
+      if (ys != null) {
+        ctx.fillStyle = `rgba(149, 152, 161, ${selected ? 0.3 : 0.12})`;
+        const top = Math.min(yd, ys) * vRatio;
+        ctx.fillRect(left, top, right - left, Math.abs(ys - yd) * vRatio);
+      }
+
+      ctx.strokeStyle = RR_COLOR;
+      ctx.lineWidth = (selected ? 3 : 1.5) * hRatio;
+      ctx.setLineDash([6 * hRatio, 4 * hRatio]);
+      [yd, ys].forEach(y => {
+        if (y == null) return;
+        ctx.beginPath();
+        ctx.moveTo(left, y * vRatio);
+        ctx.lineTo(right, y * vRatio);
+        ctx.stroke();
+      });
+      ctx.setLineDash([]);
+
+      const text = zoneValueText(zone);
+      if (text !== null && ys != null) {
+        ctx.font = `bold ${14 * vRatio}px sans-serif`;
+        ctx.fillStyle = '#d1d4dc';
+        const labelLeft = labelX(ctx, text, left, right, hRatio);
+        // Según el sentido del dibujo: de abajo hacia arriba (click 2 a mayor precio) el valor va
+        // encima de la línea superior; al revés, debajo de la línea inferior. Siempre a la derecha.
+        const drawnUpward = zone.supply.price > zone.demand.price;
+        if (drawnUpward) {
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(text, labelLeft, Math.min(yd, ys) * vRatio - 3 * vRatio);
+        } else {
+          ctx.textBaseline = 'top';
+          ctx.fillText(text, labelLeft, Math.max(yd, ys) * vRatio + 3 * vRatio);
+        }
+      }
+
+      // Objetivos 1x/2x/3x: mismas líneas grises discontinuas; el valor va al lado contrario del
+      // dibujo (debajo de la línea si los objetivos están abajo, encima si están arriba).
+      rrTargets(zone).forEach(target => {
+        const y = series.priceToCoordinate(target.price);
+        if (y == null) return;
+
+        ctx.strokeStyle = RR_COLOR;
+        ctx.lineWidth = (selected ? 3 : 1.5) * hRatio;
+        ctx.setLineDash([6 * hRatio, 4 * hRatio]);
+        ctx.beginPath();
+        ctx.moveTo(left, y * vRatio);
+        ctx.lineTo(right, y * vRatio);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        const targetText = zoneValueText(zone, target.multiple);
+        if (targetText === null) return;
+        ctx.font = `bold ${14 * vRatio}px sans-serif`;
+        ctx.fillStyle = '#d1d4dc';
+        ctx.textBaseline = target.dir < 0 ? 'top' : 'bottom';
+        const targetX = labelX(ctx, targetText, left, right, hRatio);
+        ctx.fillText(targetText, targetX, y * vRatio + (target.dir < 0 ? 3 : -3) * vRatio);
+      });
     }
 
     class ZoneLinesPrimitive {
@@ -135,6 +251,11 @@
                     const yd = series.priceToCoordinate(zone.demand.price);
                     const selected = zone === selectedZone;
 
+                    if (zone.kind === 'rr') {
+                      if (xd != null && yd != null) drawRiskReward(ctx, zone, xd, yd, selected, hRatio, vRatio);
+                      return;
+                    }
+
                     // Relleno entre las dos líneas: rojo tenue si Supply quedó arriba de Demanda,
                     // verde tenue si Demanda quedó arriba. Solo cuando la zona está completa.
                     if (zone.supply && xd != null && yd != null) {
@@ -154,11 +275,11 @@
 
                     // Valor de la zona en USD (1 contrato): ticks entre las dos líneas x tick value.
                     // Va a la derecha, centrado verticalmente entre las líneas.
-                    if (zone.supply && yd != null && tickSize > 0 && tickValue > 0) {
+                    const valueText = zoneValueText(zone);
+                    if (valueText !== null && yd != null) {
                       const ys = series.priceToCoordinate(zone.supply.price);
                       if (ys != null) {
-                        const ticks = Math.round(Math.abs(zone.supply.price - zone.demand.price) / tickSize);
-                        const text = String(Number((ticks * tickValue).toFixed(2)));
+                        const text = valueText;
                         ctx.font = `bold ${14 * vRatio}px sans-serif`;
                         ctx.textAlign = 'right';
                         ctx.textBaseline = 'middle';
@@ -216,7 +337,7 @@
     // Persistencia: las zonas completas se envían a C#, que las guarda por símbolo.
     // Solo se guardan tiempo y precio (el tiempo ya es la hora "disfrazada de UTC" del eje).
     function persistZones() {
-      const data = zones.filter(z => z.supply).map(z => ({ demand: z.demand, supply: z.supply }));
+      const data = zones.filter(z => z.supply).map(z => ({ kind: z.kind, demand: z.demand, supply: z.supply }));
       try { window.chrome.webview.postMessage(JSON.stringify(data)); } catch { /* fuera de WebView2 */ }
     }
 
@@ -224,10 +345,13 @@
     function loadZones(list) {
       [...zones].forEach(removeZone);
       list.forEach(item => {
+        // Las zonas guardadas antes de Risk:Reward no traen kind: son DZ/SZ.
+        const kind = item.kind === 'rr' ? 'rr' : 'dzsz';
         zones.push({
+          kind,
           demand: item.demand,
           supply: item.supply,
-          labels: [addAxisLabel(item.demand.price, DEMAND_COLOR)],
+          labels: kind === 'dzsz' ? [addAxisLabel(item.demand.price, DEMAND_COLOR)] : [],
         });
       });
       ensurePrimitive();
@@ -247,8 +371,17 @@
         const yd = series.priceToCoordinate(zone.demand.price);
         const ys = series.priceToCoordinate(zone.supply.price);
         if (x0 == null || yd == null || ys == null || point.x < x0) continue;
-        if (Math.abs(point.y - yd) <= TOLERANCE || Math.abs(point.y - ys) <= TOLERANCE) return zone;
-        if (inside === null && point.y > Math.min(yd, ys) && point.y < Math.max(yd, ys)) inside = zone;
+        if (zone.kind === 'rr' && point.x > x0 + RR_LENGTH_PX + TOLERANCE) continue;
+        // Risk:Reward también acierta sobre sus líneas de objetivo y el espacio hasta ellas.
+        const ys_all = [yd, ys];
+        if (zone.kind === 'rr') {
+          rrTargets(zone).forEach(target => {
+            const y = series.priceToCoordinate(target.price);
+            if (y != null) ys_all.push(y);
+          });
+        }
+        if (ys_all.some(y => Math.abs(point.y - y) <= TOLERANCE)) return zone;
+        if (inside === null && point.y > Math.min(...ys_all) && point.y < Math.max(...ys_all)) inside = zone;
       }
       return inside;
     }
@@ -265,10 +398,15 @@
 
       ensurePrimitive();
 
-      // Solo la línea verde (Demanda) muestra su valor en el eje derecho; la roja se dibuja igual
-      // pero sin etiqueta.
+      // DZ/SZ: solo la línea verde (Demanda) muestra su valor en el eje derecho; la roja se dibuja
+      // igual pero sin etiqueta. Risk:Reward no usa etiquetas de eje.
       if (dzSzPending === null) {
-        const zone = { demand: { time, price }, supply: null, labels: [addAxisLabel(price, DEMAND_COLOR)] };
+        const zone = {
+          kind: armedKind,
+          demand: { time, price },
+          supply: null,
+          labels: armedKind === 'dzsz' ? [addAxisLabel(price, DEMAND_COLOR)] : [],
+        };
         zones.push(zone);
         dzSzPending = zone;
       } else {
@@ -285,16 +423,24 @@
     // Idempotente (no es un toggle): C# guarda el estado y lo reenvía, así no se desincroniza.
     // Al cambiar el modo se descarta cualquier zona a medias (se borra la línea verde suelta): el
     // próximo click siempre empieza una zona nueva y nunca queda una zona incompleta sin guardar.
-    function setDzSzArmed(on) {
-      dzSzArmed = !!on;
-      if (dzSzPending !== null) {
+    // Solo un modo de dibujo a la vez: armar uno desplaza al otro; desarmar uno que no es el activo
+    // no hace nada.
+    function setArmed(kind, on) {
+      const previous = armedKind;
+      if (on) armedKind = kind;
+      else if (armedKind === kind) armedKind = null;
+
+      if (previous !== armedKind && dzSzPending !== null) {
         removeZone(dzSzPending);
+        dzSzPending = null;
         forceRepaint();
       }
-      dzSzPending = null;
-      if (dzSzArmed) selectedZone = null;
-      return dzSzArmed;
+      if (armedKind !== null) selectedZone = null;
+      return armedKind;
     }
+
+    function setDzSzArmed(on) { return setArmed('dzsz', !!on); }
+    function setRiskRewardArmed(on) { return setArmed('rr', !!on); }
 
     // Supr/Backspace borra la zona seleccionada; Esc quita la selección.
     document.addEventListener('keydown', event => {
@@ -306,11 +452,26 @@
       }
     });
 
+    // Tiempo del click: el de la vela si cae sobre una; si no, el que corresponde a esa posición, y a
+    // la derecha de la última vela se extrapola en pasos de una vela (permite dibujar fuera de las velas).
+    function timeAtPoint(param) {
+      if (param.time !== undefined) return param.time;
+
+      const timeScale = chart.timeScale();
+      const inData = timeScale.coordinateToTime(param.point.x);
+      if (inData != null) return inData;
+
+      if (lastBarTime == null) return null;
+      const logical = timeScale.coordinateToLogical(param.point.x);
+      if (logical == null || logical <= barCount - 1) return null;
+      return lastBarTime + Math.round(logical - (barCount - 1)) * BAR_SECONDS;
+    }
+
     chart.subscribeClick(param => {
       if (!param.point) return;
 
       // Con el modo desarmado, un click selecciona la zona bajo el cursor (o quita la selección).
-      if (!dzSzArmed) {
+      if (armedKind === null) {
         const hit = zoneAt(param.point);
         if (hit !== selectedZone) {
           selectedZone = hit;
@@ -328,7 +489,7 @@
       // última vela) se convierte el píxel x a tiempo. Si aun así es null, el click se ignora.
       let time = null;
       if (dzSzPending === null) {
-        time = param.time !== undefined ? param.time : chart.timeScale().coordinateToTime(param.point.x);
+        time = timeAtPoint(param);
         if (time == null) return;
       }
 

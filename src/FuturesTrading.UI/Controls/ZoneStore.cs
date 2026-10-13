@@ -5,8 +5,11 @@ namespace FuturesTrading.UI.Controls;
 /// <summary>Punto de una línea de zona: tiempo (hora de pared de NY "disfrazada de UTC", segundos) y precio.</summary>
 public sealed record ZonePoint(long Time, double Price);
 
-/// <summary>Zona DZ/SZ completa: línea verde (Demanda) y línea roja (Supply).</summary>
-public sealed record ZoneDto(ZonePoint Demand, ZonePoint Supply);
+/// <summary>
+/// Zona completa de dos líneas. Kind: "dzsz" (verde Demanda / roja Supply) o "rr" (Risk:Reward:
+/// entrada y stop). Ausente en lo guardado antes de Risk:Reward = "dzsz".
+/// </summary>
+public sealed record ZoneDto(ZonePoint Demand, ZonePoint Supply, string? Kind = null);
 
 /// <summary>
 /// Guarda las zonas DZ/SZ dibujadas, por símbolo, en un JSON local

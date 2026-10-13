@@ -15,7 +15,9 @@ public sealed class ChartsGridPanel : UserControl
 
     private readonly List<CandleChartPanel> _panels = new();
     private readonly Button _btnDzSz = new();
+    private readonly Button _btnRiskReward = new();
     private bool _dzSzArmed;
+    private bool _riskRewardArmed;
 
     public ChartsGridPanel(ICandleFeed feed, IOptions<ChartsSettings> options)
     {
@@ -49,6 +51,12 @@ public sealed class ChartsGridPanel : UserControl
         _btnDzSz.Size = new Size(70, 26);
         _btnDzSz.Click += (_, _) => ToggleDzSz();
 
+        _btnRiskReward.Name = "btnRiskReward";
+        _btnRiskReward.Text = "Risk:Reward";
+        _btnRiskReward.Location = new Point(82, 4);
+        _btnRiskReward.Size = new Size(96, 26);
+        _btnRiskReward.Click += (_, _) => ToggleRiskReward();
+
         var toolbar = new Panel
         {
             Name = "chartsToolbar",
@@ -56,6 +64,7 @@ public sealed class ChartsGridPanel : UserControl
             Height = 34,
         };
         toolbar.Controls.Add(_btnDzSz);
+        toolbar.Controls.Add(_btnRiskReward);
 
         // El orden de Add importa en WinForms: el control Fill va primero, el Top después.
         Controls.Add(grid);
@@ -67,7 +76,28 @@ public sealed class ChartsGridPanel : UserControl
     private void ToggleDzSz()
     {
         _dzSzArmed = !_dzSzArmed;
+        if (_dzSzArmed) SetRiskReward(false);   // un solo modo de dibujo a la vez
         _btnDzSz.BackColor = _dzSzArmed ? Color.LightGreen : SystemColors.Control;
         foreach (var panel in _panels) panel.SetDzSzArmed(_dzSzArmed);
+    }
+
+    private void ToggleRiskReward()
+    {
+        var arm = !_riskRewardArmed;
+        if (arm && _dzSzArmed)
+        {
+            _dzSzArmed = false;
+            _btnDzSz.BackColor = SystemColors.Control;
+            foreach (var panel in _panels) panel.SetDzSzArmed(false);
+        }
+
+        SetRiskReward(arm);
+    }
+
+    private void SetRiskReward(bool on)
+    {
+        _riskRewardArmed = on;
+        _btnRiskReward.BackColor = on ? Color.LightGreen : SystemColors.Control;
+        foreach (var panel in _panels) panel.SetRiskRewardArmed(on);
     }
 }

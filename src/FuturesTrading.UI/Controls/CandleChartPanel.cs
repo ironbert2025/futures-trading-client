@@ -38,6 +38,7 @@ public sealed class CandleChartPanel : UserControl
 
     private bool _chartReady;
     private bool _dzSzArmed;
+    private bool _riskRewardArmed;
     private CandlesSnapshot? _appliedSnapshot;
 
     private bool HasSymbol => _symbol.Length > 0;
@@ -118,6 +119,7 @@ public sealed class CandleChartPanel : UserControl
 
             _chartReady = true;
             if (_dzSzArmed) PushDzSzArmed();
+            if (_riskRewardArmed) PushRiskRewardArmed();
             _feed.CandleReceived += OnCandleReceived;
             _feed.LevelOneTickReceived += OnLevelOneTickReceived;
             _feed.CandlesSnapshotReceived += ApplySnapshot;
@@ -155,13 +157,28 @@ public sealed class CandleChartPanel : UserControl
         PushDzSzArmed();
     }
 
-    private void PushDzSzArmed()
+    /// <summary>
+    /// Arma o desarma el dibujo Risk:Reward (click 1 y 2: líneas grises discontinuas de largo fijo y
+    /// riesgo en USD). Es excluyente con DZ/SZ: la página solo mantiene un modo activo.
+    /// </summary>
+    public void SetRiskRewardArmed(bool on)
     {
-        var on = _dzSzArmed;
+        if (!HasSymbol) return;
+
+        _riskRewardArmed = on;
+        PushRiskRewardArmed();
+    }
+
+    private void PushDzSzArmed() => PushArmed("setDzSzArmed", _dzSzArmed);
+
+    private void PushRiskRewardArmed() => PushArmed("setRiskRewardArmed", _riskRewardArmed);
+
+    private void PushArmed(string function, bool on)
+    {
         RunOnUiThread(() =>
         {
             if (!_chartReady || _webView.CoreWebView2 is null) return;
-            _ = _webView.CoreWebView2.ExecuteScriptAsync($"setDzSzArmed({(on ? "true" : "false")});");
+            _ = _webView.CoreWebView2.ExecuteScriptAsync($"{function}({(on ? "true" : "false")});");
         });
     }
 
