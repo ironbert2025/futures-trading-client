@@ -1,0 +1,222 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Chart</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #131722; overflow: hidden; }
+    #chart { position: absolute; inset: 0; }
+  </style>
+  <script src="lightweight-charts.js"></script>
+</head>
+<body>
+  <div id="chart"></div>
+  <script>
+    // Los tiempos que recibe esta página ya vienen como "hora de pared de Nueva York disfrazada de
+    // UTC": Lightweight Charts dibuja el timestamp como dígitos UTC literales, sin convertir a la
+    // zona del equipo (ver CandleChartPanel.FakeUtcEpochSeconds).
+    const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+      autoSize: true,
+      layout: { background: { color: '#131722' }, textColor: '#d1d4dc' },
+      grid: { vertLines: { color: '#1e222d' }, horzLines: { color: '#1e222d' } },
+      timeScale: { timeVisible: true, secondsVisible: false, rightOffset: 6 },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    });
+
+    const series = chart.addCandlestickSeries({
+      upColor: '#26a69a', downColor: '#ef5350', borderVisible: false,
+      wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+    });
+
+    // ---- Granularidad (tick size) ---------------------------------------------------------------
+    // El precio de un futuro se mueve de tick en tick. Con el tick size configurado, el eje y el
+    // crosshair avanzan por ticks y muestran los decimales propios del tick (0.25 -> 2, 1 -> 0,
+    // 0.1 -> 1); las líneas DZ/SZ se ajustan a esa cuadrícula. Sin tick size (0) no hay ajuste.
+    let tickSize = 0;
+    let tickPrecision = 2;
+
+    function decimalsOf(value) {
+      const text = String(value);
+      const dot = text.indexOf('.');
+      return dot === -1 ? 0 : text.length - dot - 1;
+    }
+
+    function configureTick(size) {
+      if (!(size > 0)) { tickSize = 0; return; }
+      tickSize = size;
+      tickPrecision = decimalsOf(size);
+      series.applyOptions({ priceFormat: { type: 'price', precision: tickPrecision, minMove: size } });
+    }
+
+    // Tick más cercano al precio. toFixed corrige el error de coma flotante (0.1 * 3 = 0.30000000000000004).
+    function snapToTick(price) {
+      if (tickSize <= 0) return price;
+      return Number((Math.round(price / tickSize) * tickSize).toFixed(tickPrecision));
+    }
+
+    // Crea la vela si su tiempo es nuevo, o actualiza la que está en formación si es el mismo.
+    function upsertCandle(candle) {
+      series.update(candle);
+    }
+
+    // El hub puede entregar varios días de velas; por defecto se ven las últimas 24 h (96 velas de
+    // 15 min) y el resto queda disponible desplazándose hacia la izquierda.
+    const VISIBLE_BARS = 96;
+
+    // Reemplaza toda la serie (snapshot del hub: velas cerradas + la que está en formación).
+    function loadHistory(candles) {
+      series.setData(candles);
+      const count = candles.length;
+      if (count > VISIBLE_BARS) {
+        chart.timeScale().setVisibleLogicalRange({ from: count - VISIBLE_BARS, to: count + 6 });
+      } else {
+        chart.timeScale().fitContent();
+      }
+    }
+
+    // ---- DZ/SZ: zonas de Demanda (verde) y Supply (roja) -------------------------------------
+    // Con el modo armado, el 1er click dibuja la línea verde (Demanda) y fija el eje X de la zona;
+    // el 2º click dibuja la roja (Supply) en ese mismo X, paralela a la verde. Sigue alternando
+    // hasta desarmar. Cada línea va desde ese punto hasta el borde derecho y está anclada al
+    // TIEMPO, así que se mantiene bien al hacer zoom/pan. Entre las dos líneas se rellena un tinte
+    // suave. Solo el precio de la verde se muestra en el eje derecho.
+
+    const DEMAND_COLOR = '#26a69a';
+    const SUPPLY_COLOR = '#ef5350';
+
+    let dzSzArmed = false;
+    let dzSzPending = null;   // zona con la línea de Demanda ya dibujada, esperando la de Supply
+    const zones = [];         // [{ demand: {time, price}, supply: {time, price} | null, labels: [] }]
+    let zonesAttached = false;
+
+    // timeToCoordinate puede LANZAR (no solo devolver null) para un tiempo que no cae en una
+    // barra; si lanzara dentro de draw() se congelaría el render de todo el panel.
+    function safeTimeToCoordinate(timeScale, time) {
+      try { return timeScale.timeToCoordinate(time); } catch { return null; }
+    }
+
+    // Las primitivas no se repintan solas al cambiar sus datos: este cambio de opciones vacío lo fuerza.
+    function forceRepaint() {
+      series.applyOptions({});
+    }
+
+    class ZoneLinesPrimitive {
+      attached() {}
+      updateAllViews() {}
+      paneViews() {
+        return [{
+          renderer() {
+            return {
+              draw(target) {
+                target.useBitmapCoordinateSpace(scope => {
+                  const ctx = scope.context;
+                  const timeScale = chart.timeScale();
+                  const hRatio = scope.horizontalPixelRatio;
+                  const vRatio = scope.verticalPixelRatio;
+                  const rightEdge = scope.bitmapSize.width;
+
+                  zones.forEach(zone => {
+                    const xd = safeTimeToCoordinate(timeScale, zone.demand.time);
+                    const yd = series.priceToCoordinate(zone.demand.price);
+
+                    // Relleno entre las dos líneas: rojo tenue si Supply quedó arriba de Demanda,
+                    // verde tenue si Demanda quedó arriba. Solo cuando la zona está completa.
+                    if (zone.supply && xd != null && yd != null) {
+                      const xs = safeTimeToCoordinate(timeScale, zone.supply.time);
+                      const ys = series.priceToCoordinate(zone.supply.price);
+                      if (xs != null && ys != null) {
+                        const left = Math.max(xd, xs) * hRatio;
+                        const top = Math.min(yd, ys) * vRatio;
+                        const bottom = Math.max(yd, ys) * vRatio;
+                        ctx.fillStyle = zone.supply.price > zone.demand.price
+                          ? 'rgba(239, 83, 80, 0.15)'
+                          : 'rgba(38, 166, 154, 0.15)';
+                        ctx.fillRect(left, top, rightEdge - left, bottom - top);
+                      }
+                    }
+
+                    [[zone.demand, DEMAND_COLOR], [zone.supply, SUPPLY_COLOR]].forEach(([point, color]) => {
+                      if (!point) return;
+                      const x = safeTimeToCoordinate(timeScale, point.time);
+                      const y = series.priceToCoordinate(point.price);
+                      if (x == null || y == null) return;
+                      ctx.strokeStyle = color;
+                      ctx.lineWidth = 2 * hRatio;
+                      ctx.beginPath();
+                      ctx.moveTo(x * hRatio, y * vRatio);
+                      ctx.lineTo(rightEdge, y * vRatio);
+                      ctx.stroke();
+                    });
+                  });
+                });
+              },
+            };
+          },
+        }];
+      }
+    }
+
+    const zonePrimitive = new ZoneLinesPrimitive();
+
+    // createPriceLine ocupa siempre todo el ancho, así que solo se usa para la etiqueta del eje
+    // derecho (lineVisible:false); la línea visible la dibuja la primitiva.
+    function addAxisLabel(price, color) {
+      return series.createPriceLine({
+        price, color, lineWidth: 1, lineVisible: false, axisLabelVisible: true, title: '',
+      });
+    }
+
+    function addZonePoint(time, rawPrice) {
+      const price = snapToTick(rawPrice);
+
+      if (!zonesAttached) {
+        series.attachPrimitive(zonePrimitive);
+        zonesAttached = true;
+      }
+
+      // Solo la línea verde (Demanda) muestra su valor en el eje derecho; la roja se dibuja igual
+      // pero sin etiqueta.
+      if (dzSzPending === null) {
+        const zone = { demand: { time, price }, supply: null, labels: [addAxisLabel(price, DEMAND_COLOR)] };
+        zones.push(zone);
+        dzSzPending = zone;
+      } else {
+        // El 1er click fija el eje X de la zona: la roja nace en el mismo tiempo que la verde y
+        // queda paralela a ella; el 2º click solo aporta el precio.
+        dzSzPending.supply = { time: dzSzPending.demand.time, price };
+        dzSzPending = null;
+      }
+
+      forceRepaint();
+    }
+
+    // Idempotente (no es un toggle): C# guarda el estado y lo reenvía, así no se desincroniza.
+    // Al cambiar el modo se descarta cualquier zona a medias: el próximo click siempre empieza
+    // una zona nueva, y una línea verde suelta nunca se empareja con la roja de otra.
+    function setDzSzArmed(on) {
+      dzSzArmed = !!on;
+      dzSzPending = null;
+      return dzSzArmed;
+    }
+
+    chart.subscribeClick(param => {
+      if (!dzSzArmed || !param.point) return;
+
+      const price = series.coordinateToPrice(param.point.y);
+      if (price == null) return;
+
+      // Solo el 1er click necesita un tiempo (fija el eje X de la zona); el 2º usa el mismo X y
+      // solo toma el precio, así que puede hacerse en cualquier punto del gráfico. param.time solo
+      // viene cuando el click cae sobre una barra; en el espacio vacío (p. ej. a la derecha de la
+      // última vela) se convierte el píxel x a tiempo. Si aun así es null, el click se ignora.
+      let time = null;
+      if (dzSzPending === null) {
+        time = param.time !== undefined ? param.time : chart.timeScale().coordinateToTime(param.point.x);
+        if (time == null) return;
+      }
+
+      addZonePoint(time, price);
+    });
+  </script>
+</body>
+</html>

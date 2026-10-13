@@ -1,6 +1,9 @@
 using FuturesTrading.Application.Auth;
+using FuturesTrading.Application.Charts;
 using FuturesTrading.Infrastructure;
 using FuturesTrading.Infrastructure.Auth;
+using FuturesTrading.Infrastructure.Hub;
+using FuturesTrading.UI.Controls;
 using FuturesTrading.UI.Forms;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -28,6 +31,12 @@ static class Program
 
         services.Configure<ApiSettings>(configuration.GetSection("Api"));
         services.AddHttpClient<IAuthService, BackendApiClient>();
+
+        services.Configure<HubSettings>(configuration.GetSection("Hub"));
+        services.Configure<ChartsSettings>(configuration.GetSection("Charts"));
+        services.AddSingleton<ICandleFeed, CandleHubClient>();
+        services.AddTransient<ChartsGridPanel>();
+
         services.AddTransient<HomeForm>();
         services.AddTransient<LoginForm>(); // en pausa (spec 0002): registrado, pero no se muestra al arrancar
 
