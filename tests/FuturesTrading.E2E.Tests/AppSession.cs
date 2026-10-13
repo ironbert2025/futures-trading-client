@@ -17,7 +17,7 @@ public sealed class AppSession : IDisposable
     private readonly Application _app;
     private readonly UIA3Automation _automation = new();
 
-    public Window LoginWindow { get; }
+    public Window StartupWindow { get; }
 
     /// <param name="apiBaseUrl">
     /// Si se indica, la app arranca con Api__BaseUrl apuntando ahí (backend falso). Si no, usa el
@@ -36,13 +36,13 @@ public sealed class AppSession : IDisposable
         }
 
         _app = Application.Launch(startInfo);
-        LoginWindow = _app.GetMainWindow(_automation, DefaultTimeout)
+        StartupWindow = _app.GetMainWindow(_automation, DefaultTimeout)
             ?? throw new InvalidOperationException("No apareció la ventana de login.");
     }
 
     public bool IsEnabled(string automationId)
     {
-        var element = LoginWindow.FindFirstDescendant(cf => cf.ByAutomationId(automationId))
+        var element = StartupWindow.FindFirstDescendant(cf => cf.ByAutomationId(automationId))
             ?? throw new InvalidOperationException($"No se encontró el control '{automationId}'.");
         return element.IsEnabled;
     }
@@ -53,7 +53,7 @@ public sealed class AppSession : IDisposable
 
     public void TypeInto(string automationId, string text)
     {
-        var field = LoginWindow.FindFirstDescendant(cf => cf.ByAutomationId(automationId))
+        var field = StartupWindow.FindFirstDescendant(cf => cf.ByAutomationId(automationId))
             ?? throw new InvalidOperationException($"No se encontró el control '{automationId}'.");
         field.Focus();
         Keyboard.Type(text);
@@ -61,7 +61,7 @@ public sealed class AppSession : IDisposable
 
     public void Click(string automationId)
     {
-        var button = LoginWindow.FindFirstDescendant(cf => cf.ByAutomationId(automationId))
+        var button = StartupWindow.FindFirstDescendant(cf => cf.ByAutomationId(automationId))
             ?? throw new InvalidOperationException($"No se encontró el control '{automationId}'.");
         button.AsButton().Invoke();
     }

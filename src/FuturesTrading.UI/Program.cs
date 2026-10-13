@@ -28,10 +28,11 @@ static class Program
 
         services.Configure<ApiSettings>(configuration.GetSection("Api"));
         services.AddHttpClient<IAuthService, BackendApiClient>();
-        services.AddTransient<LoginForm>();
+        services.AddTransient<HomeForm>();
+        services.AddTransient<LoginForm>(); // en pausa (spec 0002): registrado, pero no se muestra al arrancar
 
         using var serviceProvider = services.BuildServiceProvider();
 
-        WinFormsApplication.Run(serviceProvider.GetRequiredService<LoginForm>());
+        WinFormsApplication.Run(serviceProvider.GetRequiredService<HomeForm>());
     }
 }

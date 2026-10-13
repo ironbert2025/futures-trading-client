@@ -25,14 +25,14 @@ public class LoginWindowBehaviorTests
 
     private static void AssertErrorShownAndStillOnLogin(AppSession session, string expectedMessage)
     {
-        var error = session.WaitForElement(session.LoginWindow, "lblError");
+        var error = session.WaitForElement(session.StartupWindow, "lblError");
 
         Assert.NotNull(error);
         Assert.Equal(expectedMessage, error!.Name);
         Assert.Null(session.FindWindowNow(MainWindowTitle));
     }
 
-    [Fact]
+    [Fact(Skip = PausedReasons.Login)]
     public void Ac4_BackendUnreachable_ShowsConnectionMessageAndStaysOnLogin()
     {
         using var session = new AppSession(FakeBackend.UnreachableBaseUrl());
@@ -44,7 +44,7 @@ public class LoginWindowBehaviorTests
             "No se pudo conectar con el servidor. Verifique que la API esté corriendo.");
     }
 
-    [Fact]
+    [Fact(Skip = PausedReasons.Login)]
     public void Ac5_WhileTheRequestIsInFlight_LoginButtonIsDisabledAndUiResponds_ThenEnabledAgain()
     {
         using var backend = FakeBackend.Returning(
@@ -64,11 +64,11 @@ public class LoginWindowBehaviorTests
         Assert.True(disabledWhileWaiting, "El botón Ingresar debe deshabilitarse mientras hay una petición en curso.");
         Assert.True(serverHadNotAnsweredYet, "La comprobación debe ocurrir antes de que el servidor responda.");
 
-        Assert.NotNull(session.WaitForElement(session.LoginWindow, "lblError"));
+        Assert.NotNull(session.WaitForElement(session.StartupWindow, "lblError"));
         Assert.True(session.IsEnabled("btnLogin"), "El botón debe rehabilitarse al terminar.");
     }
 
-    [Fact]
+    [Fact(Skip = PausedReasons.Login)]
     public void Ac7_ServerError_ShowsAMessageWithTheCodeAndTheAppStaysOpen()
     {
         using var backend = FakeBackend.Returning(HttpStatusCode.InternalServerError, "{}");
@@ -79,7 +79,7 @@ public class LoginWindowBehaviorTests
         AssertErrorShownAndStillOnLogin(session, "El servidor respondió con un error (500).");
     }
 
-    [Fact]
+    [Fact(Skip = PausedReasons.Login)]
     public void Ac9_OkWithoutAToken_ShowsInvalidResponseMessageAndStaysOnLogin()
     {
         using var backend = FakeBackend.Returning(HttpStatusCode.OK, "{}");
@@ -90,7 +90,7 @@ public class LoginWindowBehaviorTests
         AssertErrorShownAndStillOnLogin(session, "Respuesta inválida del servidor.");
     }
 
-    [Fact]
+    [Fact(Skip = PausedReasons.Login)]
     public void Ac8_ClosingTheMainWindow_EndsTheWholeApplication()
     {
         using var backend = FakeBackend.Returning(HttpStatusCode.OK, TokenBody);

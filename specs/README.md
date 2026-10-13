@@ -21,4 +21,5 @@ Reglas:
 
 | Spec | Título | Estado | Cobertura de AC |
 |---|---|---|---|
-| [0001-auth-login](0001-auth-login/spec.md) | Ventana de login | Implementada (retroactiva) | 9 AC, 17 tests (2 unit, 7 integración, 8 E2E): los 9 con test automatizado. Límite: el timeout (AC-7) solo en integración |
+| [0001-auth-login](0001-auth-login/spec.md) | Ventana de login | Implementada · **en pausa** desde 2026-10-13 (ver 0002) | 9 AC, 17 tests (2 unit, 7 integración, 8 E2E **omitidos** mientras el login está en pausa). Límite: el timeout (AC-7) solo en integración |
+| [0002-home-startup](0002-home-startup/spec.md) | Formulario Home como pantalla de arranque | Implementada | 3 AC: AC-1 y AC-2 con E2E (2 tests, sin backend), AC-3 verificado por `dotnet test` (8 E2E omitidos con razón) |

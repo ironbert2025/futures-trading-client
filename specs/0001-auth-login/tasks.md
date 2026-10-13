@@ -1,5 +1,7 @@
 # Tareas 0001 — Ventana de login
 
+> **En pausa desde 2026-10-13 (spec 0002):** la app arranca en `HomeForm`. Los 8 E2E de ventana están omitidos; reactivarlos es T6 de `0002`.
+
 ## Implementación (hecha)
 
 - [x] T1 (AC-2, AC-3) `IAuthService`, `AuthResult`, `AuthenticatedUser`

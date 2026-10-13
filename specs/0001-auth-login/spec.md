@@ -1,6 +1,6 @@
 # Spec 0001 — Ventana de login
 
-- **Estado**: implementada (spec retroactiva, escrita el 2026-10-12 a partir del código existente)
+- **Estado**: implementada (spec retroactiva, escrita el 2026-10-12 a partir del código existente) · **en pausa desde 2026-10-13**: la app ya no arranca en el login (ver `0002-home-startup`) y los 8 E2E de ventana están omitidos. El código y los tests de unidad e integración se conservan.
 - **Fecha**: 2026-10-12
 - **Repo dueño**: client
 - **Specs relacionadas**: `futures-trading-backend/specs/0001-auth-login` — **dueña del contrato HTTP**. Aquí se referencia, no se copia: los códigos `401`/`5xx` y el formato del token son los que define esa spec (AC-4 y AC-5 del backend).
@@ -18,7 +18,7 @@ El trader debe identificarse antes de usar la aplicación. La ventana de login c
 
 | ID | Dado / Cuando / Entonces | Verificación |
 |---|---|---|
-| AC-1 | **Dado** que se inicia la aplicación, **entonces** se muestra la ventana "Futures Trading — Ingresar" con campos Usuario y Password (enmascarado) y el botón Ingresar. | E2E · `Ac1_Startup_ShowsLoginWindowWithMaskedPasswordAndLoginButton` (título, los tres controles, password enmascarado; no necesita backend) |
+| AC-1 | **Dado** que se inicia la aplicación, **entonces** se muestra la ventana "Futures Trading — Ingresar" con campos Usuario y Password (enmascarado) y el botón Ingresar. | **Suspendido por 0002**: hoy la app arranca en Home. E2E omitido · `Ac1_Startup_ShowsLoginWindowWithMaskedPasswordAndLoginButton` (título, los tres controles, password enmascarado; no necesita backend) |
 | AC-2 | **Dado** credenciales válidas, **cuando** se pulsa Ingresar, **entonces** se abre la ventana principal con "Bienvenido, {usuario}" y la de login se oculta. | Integración · `Ac2_Success_*` (`BackendApiClient` devuelve usuario y token) · E2E · `Ac2_Login_WithValidCredentials_*` · Unit · `Ac2_Ok_*` |
 | AC-3 | **Dado** credenciales inválidas (el backend responde `401`), **cuando** se pulsa Ingresar, **entonces** se muestra "Usuario o contraseña incorrectos." y la aplicación permanece en el login. | Integración · `Ac3_Unauthorized_*` · E2E · `Ac3_Login_WithWrongPassword_*` · Unit · `Ac3_Fail_*` |
 | AC-4 | **Dado** que el backend no es alcanzable, **cuando** se pulsa Ingresar, **entonces** se muestra "No se pudo conectar con el servidor. Verifique que la API esté corriendo." sin excepción sin manejar. | Integración · `Ac4_Unreachable_*` (el cliente devuelve el mensaje en vez de lanzar) · E2E de ventana contra backend falso · `Ac4_BackendUnreachable_*` |
@@ -29,6 +29,8 @@ El trader debe identificarse antes de usar la aplicación. La ventana de login c
 | AC-9 | **Dado** que el backend responde `200` pero sin un token utilizable, **cuando** se pulsa Ingresar, **entonces** se muestra "Respuesta inválida del servidor." y no se abre la ventana principal. *(Agregado al escribir los tests de `BackendApiClient`: el comportamiento ya existía en el código.)* | Integración · `Ac9_OkWithoutAToken_*` · E2E de ventana · `Ac9_OkWithoutAToken_*` |
 
 > Niveles: **Unit** `tests/FuturesTrading.Application.Tests` · **Integración** `tests/FuturesTrading.Infrastructure.Tests` (`HttpMessageHandler` falso, sin red) · **E2E** `tests/FuturesTrading.E2E.Tests`, en dos modos: contra el **backend real** (`LoginFlowTests`: AC-1, AC-2, AC-3) y contra un **backend falso en proceso** (`LoginWindowBehaviorTests`: AC-4, AC-5, AC-7, AC-8, AC-9; la app se lanza con `Api__BaseUrl`). Los tests llevan el `AC-n` en el nombre.
+>
+> **En pausa (spec 0002):** los E2E de este documento (los de `LoginFlowTests` y `LoginWindowBehaviorTests`) están marcados `Skip` con razón escrita, porque la app arranca en `HomeForm`. Los de unidad e integración siguen corriendo. Reactivarlos es la tarea T6 de `0002`.
 >
 > **Límites conocidos:** (1) el timeout (AC-7) no se prueba en la ventana; (2) los E2E manejan teclado y foco reales, por eso corren en serie y no se debe usar el equipo mientras se ejecutan; (3) los E2E de ventana prueban el comportamiento ante respuestas simuladas, no que el backend real emita esas respuestas (eso es del backend).
 

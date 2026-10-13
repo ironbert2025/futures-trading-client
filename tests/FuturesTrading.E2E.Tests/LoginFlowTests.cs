@@ -13,29 +13,29 @@ public class LoginFlowTests
     private const string LoginWindowTitle = "Futures Trading — Ingresar";
     private const string MainWindowTitle = "Futures Trading";
 
-    [Fact]
+    [Fact(Skip = PausedReasons.Login)]
     public void Ac1_Startup_ShowsLoginWindowWithMaskedPasswordAndLoginButton()
     {
         using var session = new AppSession();
 
-        Assert.Equal(LoginWindowTitle, session.LoginWindow.Title);
-        Assert.NotNull(session.WaitForElement(session.LoginWindow, "txtUsername"));
+        Assert.Equal(LoginWindowTitle, session.StartupWindow.Title);
+        Assert.NotNull(session.WaitForElement(session.StartupWindow, "txtUsername"));
 
-        var password = session.WaitForElement(session.LoginWindow, "txtPassword");
+        var password = session.WaitForElement(session.StartupWindow, "txtPassword");
         Assert.NotNull(password);
         Assert.True(password!.Properties.IsPassword.ValueOrDefault, "El campo Password debe estar enmascarado.");
 
-        var loginButton = session.WaitForElement(session.LoginWindow, "btnLogin");
+        var loginButton = session.WaitForElement(session.StartupWindow, "btnLogin");
         Assert.NotNull(loginButton);
         Assert.Equal("Ingresar", loginButton!.Name);
     }
 
-    [Fact]
+    [Fact(Skip = PausedReasons.Login)]
     public void Ac2_Login_WithValidCredentials_ShowsMainWindowWithWelcome()
     {
         var (username, password) = ReadCredentials();
         using var session = new AppSession();
-        Assert.Equal(LoginWindowTitle, session.LoginWindow.Title);
+        Assert.Equal(LoginWindowTitle, session.StartupWindow.Title);
 
         session.TypeInto("txtUsername", username);
         session.TypeInto("txtPassword", password);
@@ -49,7 +49,7 @@ public class LoginFlowTests
         Assert.Equal($"Bienvenido, {username}", welcome!.Name);
     }
 
-    [Fact]
+    [Fact(Skip = PausedReasons.Login)]
     public void Ac3_Login_WithWrongPassword_ShowsErrorAndStaysOnLogin()
     {
         var (username, _) = ReadCredentials();
@@ -59,7 +59,7 @@ public class LoginFlowTests
         session.TypeInto("txtPassword", "definitely-not-the-password");
         session.Click("btnLogin");
 
-        var error = session.WaitForElement(session.LoginWindow, "lblError");
+        var error = session.WaitForElement(session.StartupWindow, "lblError");
         Assert.NotNull(error);
         Assert.Contains("incorrectos", error!.Name);
         Assert.Null(session.FindWindowNow(MainWindowTitle));

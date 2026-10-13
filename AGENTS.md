@@ -9,15 +9,13 @@ Cliente de escritorio Windows (C#) para trading de futuros. Es el reemplazo del 
 3. **Cálculo de negocio del lado del cliente**: riesgo/recompensa, tick values, lógica de setups — mientras no se decida mover esto a un servicio separado.
 4. **Consumo de `futures-trading-backend`** (API Python) para dos cosas puntuales: autenticación de usuario y persistencia de trades ejecutados.
 
-## Flujo de desarrollo: SDD (specs primero)
+## Flujo de desarrollo: iterar directamente (SDD en pausa)
 
-Todo cambio de comportamiento parte de una spec en `specs/NNNN-<nombre>/` (`spec.md` → `plan.md` → `tasks.md`), aprobada por el usuario **antes** de escribir código. Los criterios de aceptación tienen ID (`AC-n`) y cada test lo lleva en su nombre. Si el comportamiento cambia, la spec cambia primero.
+**Decisión del usuario (2026-10-13): SDD queda a un lado.** Se itera y se desarrolla directamente: no hace falta escribir una spec ni pedir su aprobación antes de cambiar código, y no se agregan más tests unitarios. Lo que ya existe se conserva como referencia (no borrar):
 
-- Flujo, reglas e índice de specs: [`specs/README.md`](specs/README.md). Plantillas en `specs/_template/` (copia de las del backend; mantenerlas iguales).
-- **El contrato HTTP lo posee el backend.** Las specs de este repo lo referencian (`futures-trading-backend/specs/...`) y no lo copian.
-- Cada AC se verifica en el nivel más barato posible: unit (`Domain`/`Application`), integración (`Infrastructure`), E2E solo para flujos críticos.
-- Antes de implementar una feature nueva, leer su spec; si no existe, escribirla y pedir aprobación.
-- Estado: `0001-auth-login` es retroactiva y tiene 17 tests (2 unit, 7 integración, 8 E2E), con los 9 AC cubiertos. Límite documentado: el timeout (AC-7) solo se prueba en integración.
+- `specs/` (índice en [`specs/README.md`](specs/README.md)) con `0001-auth-login` y `0002-home-startup`. **El contrato HTTP lo posee el backend** (`futures-trading-backend/specs/...`). No se mantienen al día salvo que el usuario lo pida; **si el código cambia, pueden quedar desactualizadas**.
+- Los tests existentes (unit, integración, E2E) se conservan y siguen corriendo con `dotnet test`. Tests nuevos, solo si el usuario los pide.
+- Estado de `0001-auth-login` (al 2026-10-13) es retroactiva y tiene 17 tests (2 unit, 7 integración, 8 E2E) con los 9 AC cubiertos, pero está **en pausa** desde 2026-10-13: la app arranca en `HomeForm` (spec `0002-home-startup`) y los 8 E2E de ventana están omitidos (`Skip = PausedReasons.Login`). Reactivarlos es T6 de `0002`. Límite documentado: el timeout (AC-7) solo se prueba en integración.
 
 ### Tests
 
@@ -28,7 +26,7 @@ dotnet test tests/FuturesTrading.Application.Tests    # unit
 ```
 
 - `Infrastructure.Tests` prueba `BackendApiClient` con un `HttpMessageHandler` falso: verifica lo que el cliente **envía** y cómo traduce cada respuesta. El handler captura la petición **dentro** de `SendAsync` (después `HttpClient` puede liberarla).
-- Nombrar cada test con su `AC-n` (`Ac3_Unauthorized_...`). Un criterio nuevo nace con su test en el mismo cambio.
+- Los tests existentes llevan su `AC-n` en el nombre (`Ac3_Unauthorized_...`). **No se agregan tests unitarios nuevos** (decisión del usuario, 2026-10-13); no borrar los que hay.
 
 ## Fuera de alcance para el backend Python (y por qué importa aquí)
 
@@ -87,7 +85,9 @@ Auditoría completa disponible; estas son restricciones activas, no solo histori
 
 ## Estado actual
 
-**Login funcional de punta a punta (verificado 2026-09-11)**, contra el backend real corriendo en local.
+**Cambio de arranque (2026-10-13, spec `0002-home-startup`)**: la aplicación abre en `HomeForm` ("Futures Trading — Home", formulario vacío) en vez del login. El login **no se eliminó**: `LoginForm`, `IAuthService` y `BackendApiClient` siguen en el código y con sus tests de unidad e integración; solo los E2E de ventana del login están omitidos con razón escrita. Consecuencia a tener presente: **hoy la app abre sin autenticar**; es aceptable solo porque Home está vacío. Antes de agregar funcionalidad que dependa de la identidad del usuario, retomar el login (`0001`). En los E2E, `AppSession.StartupWindow` es la primera ventana que muestra la app.
+
+**Login funcional de punta a punta (verificado 2026-09-11, hoy en pausa)**, contra el backend real corriendo en local.
 
 Solución `FuturesTrading.sln` en `src/` y `tests/`:
 - `FuturesTrading.Domain` — `AuthenticatedUser`.
