@@ -21,6 +21,8 @@ public sealed class CandleChartPanel : UserControl
     private const int IntervalMinutes = 15;
     private const string AssetsHost = "chart.local";
 
+    private static readonly JsonSerializerOptions ZoneJson = new(JsonSerializerDefaults.Web);
+
     private static readonly TimeZoneInfo Eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
 
     private readonly ICandleFeed _feed;
@@ -106,6 +108,11 @@ public sealed class CandleChartPanel : UserControl
                 await _webView.CoreWebView2.ExecuteScriptAsync($"configureTick({tick});");
             }
 
+            // Zonas DZ/SZ guardadas de este símbolo; las nuevas llegan por WebMessageReceived.
+            _webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
+            var savedZones = JsonSerializer.Serialize(ZoneStore.Load(_symbol), ZoneJson);
+            await _webView.CoreWebView2.ExecuteScriptAsync($"loadZones({savedZones});");
+
             _chartReady = true;
             if (_dzSzArmed) PushDzSzArmed();
             _feed.CandleReceived += OnCandleReceived;
@@ -153,6 +160,17 @@ public sealed class CandleChartPanel : UserControl
             if (!_chartReady || _webView.CoreWebView2 is null) return;
             _ = _webView.CoreWebView2.ExecuteScriptAsync($"setDzSzArmed({(on ? "true" : "false")});");
         });
+    }
+
+    // La página manda la lista completa de zonas cada vez que cambia (se completa o se borra una).
+    private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        try
+        {
+            var zones = JsonSerializer.Deserialize<List<ZoneDto>>(e.TryGetWebMessageAsString(), ZoneJson);
+            if (zones is not null) ZoneStore.Save(_symbol, zones);
+        }
+        catch (JsonException) { /* mensaje mal formado: se ignora, no se pierde lo ya guardado */ }
     }
 
     private void OnCandleReceived(string symbol, Candle minuteCandle)

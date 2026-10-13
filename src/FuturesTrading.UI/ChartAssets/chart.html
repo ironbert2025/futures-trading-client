@@ -64,8 +64,11 @@
     const VISIBLE_BARS = 96;
 
     // Reemplaza toda la serie (snapshot del hub: velas cerradas + la que está en formación).
+    let firstBarTime = null;
+
     function loadHistory(candles) {
       series.setData(candles);
+      firstBarTime = candles.length > 0 ? candles[0].time : null;
       const count = candles.length;
       if (count > VISIBLE_BARS) {
         chart.timeScale().setVisibleLogicalRange({ from: count - VISIBLE_BARS, to: count + 6 });
@@ -88,11 +91,21 @@
     let dzSzPending = null;   // zona con la línea de Demanda ya dibujada, esperando la de Supply
     const zones = [];         // [{ demand: {time, price}, supply: {time, price} | null, labels: [] }]
     let zonesAttached = false;
+    let selectedZone = null;  // zona elegida con un click (con el modo DZ/SZ desarmado)
 
     // timeToCoordinate puede LANZAR (no solo devolver null) para un tiempo que no cae en una
     // barra; si lanzara dentro de draw() se congelaría el render de todo el panel.
     function safeTimeToCoordinate(timeScale, time) {
       try { return timeScale.timeToCoordinate(time); } catch { return null; }
+    }
+
+    // Una zona guardada puede haber nacido antes de la primera vela que el hub entrega hoy: en ese
+    // caso se dibuja desde el borde izquierdo en vez de desaparecer.
+    function xOf(timeScale, time) {
+      const x = safeTimeToCoordinate(timeScale, time);
+      if (x != null) return x;
+      if (firstBarTime != null && time < firstBarTime) return 0;
+      return null;
     }
 
     // Las primitivas no se repintan solas al cambiar sus datos: este cambio de opciones vacío lo fuerza.
@@ -116,32 +129,34 @@
                   const rightEdge = scope.bitmapSize.width;
 
                   zones.forEach(zone => {
-                    const xd = safeTimeToCoordinate(timeScale, zone.demand.time);
+                    const xd = xOf(timeScale, zone.demand.time);
                     const yd = series.priceToCoordinate(zone.demand.price);
+                    const selected = zone === selectedZone;
 
                     // Relleno entre las dos líneas: rojo tenue si Supply quedó arriba de Demanda,
                     // verde tenue si Demanda quedó arriba. Solo cuando la zona está completa.
                     if (zone.supply && xd != null && yd != null) {
-                      const xs = safeTimeToCoordinate(timeScale, zone.supply.time);
+                      const xs = xOf(timeScale, zone.supply.time);
                       const ys = series.priceToCoordinate(zone.supply.price);
                       if (xs != null && ys != null) {
                         const left = Math.max(xd, xs) * hRatio;
                         const top = Math.min(yd, ys) * vRatio;
                         const bottom = Math.max(yd, ys) * vRatio;
+                        const alpha = selected ? 0.3 : 0.15;
                         ctx.fillStyle = zone.supply.price > zone.demand.price
-                          ? 'rgba(239, 83, 80, 0.15)'
-                          : 'rgba(38, 166, 154, 0.15)';
+                          ? `rgba(239, 83, 80, ${alpha})`
+                          : `rgba(38, 166, 154, ${alpha})`;
                         ctx.fillRect(left, top, rightEdge - left, bottom - top);
                       }
                     }
 
                     [[zone.demand, DEMAND_COLOR], [zone.supply, SUPPLY_COLOR]].forEach(([point, color]) => {
                       if (!point) return;
-                      const x = safeTimeToCoordinate(timeScale, point.time);
+                      const x = xOf(timeScale, point.time);
                       const y = series.priceToCoordinate(point.price);
                       if (x == null || y == null) return;
                       ctx.strokeStyle = color;
-                      ctx.lineWidth = 2 * hRatio;
+                      ctx.lineWidth = (selected ? 4 : 2) * hRatio;
                       ctx.beginPath();
                       ctx.moveTo(x * hRatio, y * vRatio);
                       ctx.lineTo(rightEdge, y * vRatio);
@@ -166,13 +181,72 @@
       });
     }
 
+    function ensurePrimitive() {
+      if (zonesAttached) return;
+      series.attachPrimitive(zonePrimitive);
+      zonesAttached = true;
+    }
+
+    // Quita la zona del gráfico (líneas, etiquetas del eje y selección).
+    function removeZone(zone) {
+      zone.labels.forEach(label => series.removePriceLine(label));
+      const index = zones.indexOf(zone);
+      if (index !== -1) zones.splice(index, 1);
+      if (zone === selectedZone) selectedZone = null;
+      if (zone === dzSzPending) dzSzPending = null;
+    }
+
+    // Persistencia: las zonas completas se envían a C#, que las guarda por símbolo.
+    // Solo se guardan tiempo y precio (el tiempo ya es la hora "disfrazada de UTC" del eje).
+    function persistZones() {
+      const data = zones.filter(z => z.supply).map(z => ({ demand: z.demand, supply: z.supply }));
+      try { window.chrome.webview.postMessage(JSON.stringify(data)); } catch { /* fuera de WebView2 */ }
+    }
+
+    // Carga las zonas guardadas (C# las manda al abrir el gráfico).
+    function loadZones(list) {
+      [...zones].forEach(removeZone);
+      list.forEach(item => {
+        zones.push({
+          demand: item.demand,
+          supply: item.supply,
+          labels: [addAxisLabel(item.demand.price, DEMAND_COLOR)],
+        });
+      });
+      ensurePrimitive();
+      forceRepaint();
+    }
+
+    // Zona bajo el punto (px del gráfico): primero por cercanía a una de sus líneas y, si no, por
+    // estar dentro del relleno. Se prueba de la más reciente a la más antigua.
+    function zoneAt(point) {
+      const TOLERANCE = 6;
+      const timeScale = chart.timeScale();
+      let inside = null;
+      for (let i = zones.length - 1; i >= 0; i--) {
+        const zone = zones[i];
+        if (!zone.supply) continue;
+        const x0 = xOf(timeScale, zone.demand.time);
+        const yd = series.priceToCoordinate(zone.demand.price);
+        const ys = series.priceToCoordinate(zone.supply.price);
+        if (x0 == null || yd == null || ys == null || point.x < x0) continue;
+        if (Math.abs(point.y - yd) <= TOLERANCE || Math.abs(point.y - ys) <= TOLERANCE) return zone;
+        if (inside === null && point.y > Math.min(yd, ys) && point.y < Math.max(yd, ys)) inside = zone;
+      }
+      return inside;
+    }
+
+    function deleteSelectedZone() {
+      if (selectedZone === null) return;
+      removeZone(selectedZone);
+      persistZones();
+      forceRepaint();
+    }
+
     function addZonePoint(time, rawPrice) {
       const price = snapToTick(rawPrice);
 
-      if (!zonesAttached) {
-        series.attachPrimitive(zonePrimitive);
-        zonesAttached = true;
-      }
+      ensurePrimitive();
 
       // Solo la línea verde (Demanda) muestra su valor en el eje derecho; la roja se dibuja igual
       // pero sin etiqueta.
@@ -185,22 +259,48 @@
         // queda paralela a ella; el 2º click solo aporta el precio.
         dzSzPending.supply = { time: dzSzPending.demand.time, price };
         dzSzPending = null;
+        persistZones();
       }
 
       forceRepaint();
     }
 
     // Idempotente (no es un toggle): C# guarda el estado y lo reenvía, así no se desincroniza.
-    // Al cambiar el modo se descarta cualquier zona a medias: el próximo click siempre empieza
-    // una zona nueva, y una línea verde suelta nunca se empareja con la roja de otra.
+    // Al cambiar el modo se descarta cualquier zona a medias (se borra la línea verde suelta): el
+    // próximo click siempre empieza una zona nueva y nunca queda una zona incompleta sin guardar.
     function setDzSzArmed(on) {
       dzSzArmed = !!on;
+      if (dzSzPending !== null) {
+        removeZone(dzSzPending);
+        forceRepaint();
+      }
       dzSzPending = null;
+      if (dzSzArmed) selectedZone = null;
       return dzSzArmed;
     }
 
+    // Supr/Backspace borra la zona seleccionada; Esc quita la selección.
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        deleteSelectedZone();
+      } else if (event.key === 'Escape' && selectedZone !== null) {
+        selectedZone = null;
+        forceRepaint();
+      }
+    });
+
     chart.subscribeClick(param => {
-      if (!dzSzArmed || !param.point) return;
+      if (!param.point) return;
+
+      // Con el modo desarmado, un click selecciona la zona bajo el cursor (o quita la selección).
+      if (!dzSzArmed) {
+        const hit = zoneAt(param.point);
+        if (hit !== selectedZone) {
+          selectedZone = hit;
+          forceRepaint();
+        }
+        return;
+      }
 
       const price = series.coordinateToPrice(param.point.y);
       if (price == null) return;
