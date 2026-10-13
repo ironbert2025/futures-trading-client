@@ -30,6 +30,7 @@ public sealed class CandleChartPanel : UserControl
     private readonly string _symbol;
     private readonly string _sessionLabel;
     private readonly decimal _tickSize;
+    private readonly decimal _tickValue;
     private readonly CandleAggregator _aggregator;
     private readonly object _aggregatorLock = new();
     private readonly Label _header = new();
@@ -49,6 +50,7 @@ public sealed class CandleChartPanel : UserControl
         _symbol = (settings.Symbol ?? "").Trim().ToUpperInvariant();
         _sessionLabel = settings.RthOnly ? "RTH" : "24 h";
         _tickSize = settings.TickSize;
+        _tickValue = settings.TickValue;
         _aggregator = new CandleAggregator(IntervalMinutes, settings.RthOnly);
 
         _header.Name = $"lblChartStatus{slot}";
@@ -105,7 +107,8 @@ public sealed class CandleChartPanel : UserControl
             if (_tickSize > 0)
             {
                 var tick = _tickSize.ToString(CultureInfo.InvariantCulture);
-                await _webView.CoreWebView2.ExecuteScriptAsync($"configureTick({tick});");
+                var value = _tickValue.ToString(CultureInfo.InvariantCulture);
+                await _webView.CoreWebView2.ExecuteScriptAsync($"configureTick({tick}, {value});");
             }
 
             // Zonas DZ/SZ guardadas de este símbolo; las nuevas llegan por WebMessageReceived.

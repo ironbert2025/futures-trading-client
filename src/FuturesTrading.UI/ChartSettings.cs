@@ -17,6 +17,12 @@ public sealed class ChartSettings
     /// tick: el eje usa esta granularidad y las líneas DZ/SZ se ajustan a ella. 0 = sin dato (sin ajuste).
     /// </summary>
     public decimal TickSize { get; init; }
+
+    /// <summary>
+    /// Valor en USD de un tick de un contrato (p. ej. 1.25 para /MES). Con TickSize da el valor de
+    /// una zona DZ/SZ: ticks entre sus líneas x TickValue. 0 = sin dato (la zona no muestra valor).
+    /// </summary>
+    public decimal TickValue { get; init; }
 }
 
 /// <summary>Los gráficos de la pestaña Charts, en orden: arriba-izquierda, arriba-derecha, abajo-izquierda, abajo-derecha.</summary>

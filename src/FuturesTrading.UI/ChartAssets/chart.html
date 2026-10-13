@@ -34,6 +34,7 @@
     // 0.1 -> 1); las líneas DZ/SZ se ajustan a esa cuadrícula. Sin tick size (0) no hay ajuste.
     let tickSize = 0;
     let tickPrecision = 2;
+    let tickValue = 0;   // USD por tick (1 contrato); 0 = sin dato, la zona no muestra su valor
 
     function decimalsOf(value) {
       const text = String(value);
@@ -41,7 +42,8 @@
       return dot === -1 ? 0 : text.length - dot - 1;
     }
 
-    function configureTick(size) {
+    function configureTick(size, value) {
+      tickValue = value > 0 ? value : 0;
       if (!(size > 0)) { tickSize = 0; return; }
       tickSize = size;
       tickPrecision = decimalsOf(size);
@@ -147,6 +149,21 @@
                           ? `rgba(239, 83, 80, ${alpha})`
                           : `rgba(38, 166, 154, ${alpha})`;
                         ctx.fillRect(left, top, rightEdge - left, bottom - top);
+                      }
+                    }
+
+                    // Valor de la zona en USD (1 contrato): ticks entre las dos líneas x tick value.
+                    // Va a la derecha, centrado verticalmente entre las líneas.
+                    if (zone.supply && yd != null && tickSize > 0 && tickValue > 0) {
+                      const ys = series.priceToCoordinate(zone.supply.price);
+                      if (ys != null) {
+                        const ticks = Math.round(Math.abs(zone.supply.price - zone.demand.price) / tickSize);
+                        const text = String(Number((ticks * tickValue).toFixed(2)));
+                        ctx.font = `bold ${14 * vRatio}px sans-serif`;
+                        ctx.textAlign = 'right';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillStyle = '#d1d4dc';
+                        ctx.fillText(text, rightEdge - 10 * hRatio, ((yd + ys) / 2) * vRatio);
                       }
                     }
 
