@@ -1,6 +1,8 @@
+using FuturesTrading.Application.Atm;
 using FuturesTrading.Application.Auth;
 using FuturesTrading.Application.Charts;
 using FuturesTrading.Infrastructure;
+using FuturesTrading.Infrastructure.Atm;
 using FuturesTrading.Infrastructure.Auth;
 using FuturesTrading.Infrastructure.Hub;
 using FuturesTrading.UI.Controls;
@@ -35,6 +37,8 @@ static class Program
         services.Configure<HubSettings>(configuration.GetSection("Hub"));
         services.Configure<ChartsSettings>(configuration.GetSection("Charts"));
         services.AddSingleton<ICandleFeed, CandleHubClient>();
+        services.Configure<AtmSettings>(configuration.GetSection("Atm"));
+        services.AddSingleton<IAtmTemplateStore, NinjaTraderAtmTemplateStore>();
         services.AddTransient<ChartsGridPanel>();
 
         services.AddTransient<HomeForm>();

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using FuturesTrading.Application.Atm;
 using FuturesTrading.Application.Charts;
 using FuturesTrading.Domain;
 using Microsoft.Web.WebView2.Core;
@@ -26,6 +27,7 @@ public sealed class CandleChartPanel : UserControl
     private static readonly TimeZoneInfo Eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
 
     private readonly ICandleFeed _feed;
+    private readonly IAtmTemplateStore _atmStore;
     private readonly int _slot;
     private readonly string _symbol;
     private readonly decimal _tickSize;
@@ -43,9 +45,10 @@ public sealed class CandleChartPanel : UserControl
     private bool HasSymbol => _symbol.Length > 0;
 
     /// <param name="slot">Número del panel (1..N), solo para identificarlo en pantalla.</param>
-    public CandleChartPanel(ICandleFeed feed, ChartSettings settings, int slot)
+    public CandleChartPanel(ICandleFeed feed, IAtmTemplateStore atmStore, ChartSettings settings, int slot)
     {
         _feed = feed;
+        _atmStore = atmStore;
         _slot = slot;
         _symbol = (settings.Symbol ?? "").Trim().ToUpperInvariant();
         _tickSize = settings.TickSize;
@@ -178,15 +181,62 @@ public sealed class CandleChartPanel : UserControl
         });
     }
 
-    // La página manda la lista completa de zonas cada vez que cambia (se completa o se borra una).
+    // Mensajes de la página, con un campo "type":
+    //  - "zones": la lista completa de zonas cada vez que cambia (se completa o se borra una).
+    //  - "atm": se tocó un valor de profit de Risk:Reward; hay que crear la plantilla ATM (stop/profit en ticks).
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
         try
         {
-            var zones = JsonSerializer.Deserialize<List<ZoneDto>>(e.TryGetWebMessageAsString(), ZoneJson);
-            if (zones is not null) ZoneStore.Save(_symbol, zones);
+            using var message = JsonDocument.Parse(e.TryGetWebMessageAsString());
+            var root = message.RootElement;
+
+            switch (root.GetProperty("type").GetString())
+            {
+                case "zones":
+                    var zones = root.GetProperty("zones").Deserialize<List<ZoneDto>>(ZoneJson);
+                    if (zones is not null) ZoneStore.Save(_symbol, zones);
+                    break;
+
+                case "atm":
+                    _ = CreateAtmTemplateAsync(root.GetProperty("stopTicks").GetInt32(), root.GetProperty("targetTicks").GetInt32());
+                    break;
+            }
         }
-        catch (JsonException) { /* mensaje mal formado: se ignora, no se pierde lo ya guardado */ }
+        catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
+        {
+            /* mensaje mal formado: se ignora, no se pierde lo ya guardado */
+        }
+    }
+
+    // La escritura va a una carpeta de red: se hace fuera del hilo de UI y el resultado se muestra en el gráfico.
+    private async Task CreateAtmTemplateAsync(int stopTicks, int targetTicks)
+    {
+        string text;
+        string kind;
+        try
+        {
+            var template = new AtmTemplate(stopTicks, targetTicks);
+            var result = await Task.Run(() => _atmStore.Create(template));
+            (text, kind) = result == AtmTemplateResult.Created
+                ? ($"{template.Name} creada", "ok")
+                : ($"{template.Name} ya existe", "warn");
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            (text, kind) = (ex.Message.Split('\n')[0], "error");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            (text, kind) = ($"No se pudo crear la plantilla: {ex.Message}", "error");
+        }
+
+        var script = $"showToast({JsonSerializer.Serialize(text)}, {JsonSerializer.Serialize(kind)});";
+        RunOnUiThread(() =>
+        {
+            if (!_chartReady || _webView.CoreWebView2 is null) return;
+            _ = _webView.CoreWebView2.ExecuteScriptAsync(script);
+        });
     }
 
     private void OnCandleReceived(string symbol, Candle minuteCandle)

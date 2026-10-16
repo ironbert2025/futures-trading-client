@@ -1,3 +1,4 @@
+using FuturesTrading.Application.Atm;
 using FuturesTrading.Application.Charts;
 using Microsoft.Extensions.Options;
 
@@ -19,7 +20,7 @@ public sealed class ChartsGridPanel : UserControl
     private bool _dzSzArmed;
     private bool _riskRewardArmed;
 
-    public ChartsGridPanel(ICandleFeed feed, IOptions<ChartsSettings> options)
+    public ChartsGridPanel(ICandleFeed feed, IAtmTemplateStore atmStore, IOptions<ChartsSettings> options)
     {
         var configured = options.Value.Panels;
 
@@ -36,7 +37,7 @@ public sealed class ChartsGridPanel : UserControl
         for (var i = 0; i < Columns * Rows; i++)
         {
             var settings = i < configured.Count ? configured[i] : new ChartSettings();
-            var panel = new CandleChartPanel(feed, settings, slot: i + 1)
+            var panel = new CandleChartPanel(feed, atmStore, settings, slot: i + 1)
             {
                 Dock = DockStyle.Fill,
                 Margin = new Padding(2),

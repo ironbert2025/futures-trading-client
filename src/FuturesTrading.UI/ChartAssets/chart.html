@@ -6,11 +6,18 @@
   <style>
     html, body { margin: 0; height: 100%; background: #131722; overflow: hidden; }
     #chart { position: absolute; inset: 0; }
+    #toast {
+      position: absolute; left: 50%; bottom: 40px; transform: translateX(-50%);
+      padding: 6px 14px; border-radius: 4px; font: bold 13px sans-serif; color: #fff;
+      pointer-events: none; opacity: 0; transition: opacity .2s; z-index: 10; max-width: 90%;
+    }
+    #toast.visible { opacity: 1; }
   </style>
   <script src="lightweight-charts.js"></script>
 </head>
 <body>
   <div id="chart"></div>
+  <div id="toast"></div>
   <script>
     // Los tiempos que recibe esta página ya vienen como "hora de pared de Nueva York disfrazada de
     // UTC": Lightweight Charts dibuja el timestamp como dígitos UTC literales, sin convertir a la
@@ -151,6 +158,12 @@
 
     const RR_TARGET_MULTIPLES = [1, 2, 3];
 
+    // Riesgo de una zona en ticks (distancia entre sus dos líneas); 0 si no hay tick size.
+    function riskTicks(zone) {
+      if (!zone.supply || !(tickSize > 0)) return 0;
+      return Math.round(Math.abs(zone.supply.price - zone.demand.price) / tickSize);
+    }
+
     // Precios de las líneas de objetivo de Risk:Reward: 1x, 2x y 3x el riesgo medido desde la línea 1,
     // hacia el lado contrario al del dibujo. dir = -1 (hacia abajo) si se dibujó de abajo hacia arriba.
     function rrTargets(zone) {
@@ -176,6 +189,7 @@
     }
 
     function drawRiskReward(ctx, zone, x0, yd, selected, hRatio, vRatio) {
+      zone.profitHits = [];   // áreas clicables de los valores de profit (px CSS), se rehacen en cada dibujo
       const ys = zone.supply ? series.priceToCoordinate(zone.supply.price) : null;
       const left = x0 * hRatio;
       const right = (x0 + RR_LENGTH_PX) * hRatio;
@@ -260,7 +274,16 @@
         ctx.fillStyle = RR_PROFIT_TEXT;
         ctx.textBaseline = target.dir < 0 ? 'hanging' : 'alphabetic';
         const targetX = labelX(ctx, targetText, left, right, hRatio);
-        ctx.fillText(targetText, targetX, y * vRatio + (target.dir < 0 ? LABEL_RISE : -LABEL_RISE) * vRatio);
+        const targetY = y * vRatio + (target.dir < 0 ? LABEL_RISE : -LABEL_RISE) * vRatio;
+        ctx.fillText(targetText, targetX, targetY);
+
+        // Área clicable del valor (con un margen): crea la plantilla ATM de este profit.
+        const textWidth = ctx.measureText(targetText).width;
+        const boxLeft = (ctx.textAlign === 'left' ? targetX : targetX - textWidth) / hRatio;
+        const boxTop = (target.dir < 0 ? targetY : targetY - 14 * vRatio) / vRatio;
+        zone.profitHits.push({
+          x: boxLeft - 4, y: boxTop - 3, w: textWidth / hRatio + 8, h: 14 + 6, multiple: target.multiple,
+        });
       });
     }
 
@@ -371,7 +394,22 @@
     // Solo se guardan tiempo y precio (el tiempo ya es la hora "disfrazada de UTC" del eje).
     function persistZones() {
       const data = zones.filter(z => z.supply).map(z => ({ kind: z.kind, demand: z.demand, supply: z.supply }));
-      try { window.chrome.webview.postMessage(JSON.stringify(data)); } catch { /* fuera de WebView2 */ }
+      postToHost({ type: 'zones', zones: data });
+    }
+
+    function postToHost(message) {
+      try { window.chrome.webview.postMessage(JSON.stringify(message)); } catch { /* fuera de WebView2 */ }
+    }
+
+    // Aviso breve sobre el gráfico (resultado de crear una plantilla ATM): kind = ok | warn | error.
+    let toastTimer = null;
+    function showToast(text, kind) {
+      const toast = document.getElementById('toast');
+      toast.textContent = text;
+      toast.style.background = kind === 'ok' ? '#26a69a' : kind === 'warn' ? '#b8860b' : '#ef5350';
+      toast.classList.add('visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('visible'), 3500);
     }
 
     // Carga las zonas guardadas (C# las manda al abrir el gráfico).
@@ -417,6 +455,18 @@
         if (inside === null && point.y > Math.min(...ys_all) && point.y < Math.max(...ys_all)) inside = zone;
       }
       return inside;
+    }
+
+    // Valor de profit de Risk:Reward bajo el punto (px del gráfico), o null.
+    function profitHitAt(point) {
+      for (let i = zones.length - 1; i >= 0; i--) {
+        const zone = zones[i];
+        if (zone.kind !== 'rr' || !zone.profitHits) continue;
+        const box = zone.profitHits.find(b =>
+          point.x >= b.x && point.x <= b.x + b.w && point.y >= b.y && point.y <= b.y + b.h);
+        if (box) return { zone, multiple: box.multiple };
+      }
+      return null;
     }
 
     function deleteSelectedZone() {
@@ -503,8 +553,18 @@
     chart.subscribeClick(param => {
       if (!param.point) return;
 
-      // Con el modo desarmado, un click selecciona la zona bajo el cursor (o quita la selección).
+      // Con el modo desarmado: tocar un valor de profit de Risk:Reward crea su plantilla ATM; si no, un
+      // click selecciona la zona bajo el cursor (o quita la selección).
       if (armedKind === null) {
+        const profit = profitHitAt(param.point);
+        if (profit !== null) {
+          const stopTicks = riskTicks(profit.zone);
+          if (stopTicks >= 1) {
+            postToHost({ type: 'atm', stopTicks, targetTicks: stopTicks * profit.multiple });
+          }
+          return;
+        }
+
         const hit = zoneAt(param.point);
         if (hit !== selectedZone) {
           selectedZone = hit;
