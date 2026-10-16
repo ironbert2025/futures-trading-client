@@ -104,6 +104,10 @@
     // Risk:Reward: dos líneas grises discontinuas de largo FIJO (en px de pantalla) entre el click 1
     // y el 2, con el riesgo en USD a su derecha. Comparte con DZ/SZ la selección, borrado y guardado.
     const RR_COLOR = '#9598a1';
+    // Valores de Risk:Reward: riesgo en USD (rojo), objetivos/profit en USD (verde), riesgo en ticks (amarillo).
+    const RR_RISK_TEXT = '#ef5350';
+    const RR_PROFIT_TEXT = '#26a69a';
+    const RR_TICKS_TEXT = '#ffd54f';
     const RR_LENGTH_PX = 30;
 
     let armedKind = null;     // modo de dibujo activo: 'dzsz' | 'rr' | null (desarmado)
@@ -160,10 +164,15 @@
 
     // Posición X de un valor junto a las líneas: a la derecha si cabe en el panel; si no (zona
     // dibujada cerca del borde derecho), a la izquierda para que no quede recortado.
+    // Los valores van pegados al extremo de la línea discontinua: poca separación horizontal, y
+    // verticalmente apoyados justo encima (baseline alfabético) o colgando justo debajo (hanging).
+    const LABEL_GAP = 3;
+    const LABEL_RISE = 2;
+
     function labelX(ctx, text, left, right, hRatio) {
-      const fits = right + 6 * hRatio + ctx.measureText(text).width <= ctx.canvas.width;
+      const fits = right + LABEL_GAP * hRatio + ctx.measureText(text).width <= ctx.canvas.width;
       ctx.textAlign = fits ? 'left' : 'right';
-      return fits ? right + 6 * hRatio : left - 6 * hRatio;
+      return fits ? right + LABEL_GAP * hRatio : left - LABEL_GAP * hRatio;
     }
 
     function drawRiskReward(ctx, zone, x0, yd, selected, hRatio, vRatio) {
@@ -192,17 +201,41 @@
       const text = zoneValueText(zone);
       if (text !== null && ys != null) {
         ctx.font = `bold ${14 * vRatio}px sans-serif`;
-        ctx.fillStyle = '#d1d4dc';
+        ctx.fillStyle = RR_RISK_TEXT;
         const labelLeft = labelX(ctx, text, left, right, hRatio);
         // Según el sentido del dibujo: de abajo hacia arriba (click 2 a mayor precio) el valor va
         // encima de la línea superior; al revés, debajo de la línea inferior. Siempre a la derecha.
         const drawnUpward = zone.supply.price > zone.demand.price;
         if (drawnUpward) {
-          ctx.textBaseline = 'bottom';
-          ctx.fillText(text, labelLeft, Math.min(yd, ys) * vRatio - 3 * vRatio);
+          ctx.textBaseline = 'alphabetic';
+          ctx.fillText(text, labelLeft, Math.min(yd, ys) * vRatio - LABEL_RISE * vRatio);
         } else {
-          ctx.textBaseline = 'top';
-          ctx.fillText(text, labelLeft, Math.max(yd, ys) * vRatio + 3 * vRatio);
+          ctx.textBaseline = 'hanging';
+          ctx.fillText(text, labelLeft, Math.max(yd, ys) * vRatio + LABEL_RISE * vRatio);
+        }
+      }
+
+      // Riesgo en ticks: a la IZQUIERDA de las líneas y al mismo nivel que el valor en USD (que va a la
+      // derecha); se calcula con el tick size aunque no haya tick value.
+      if (ys != null && tickSize > 0) {
+        const ticksText = String(Math.round(Math.abs(zone.supply.price - zone.demand.price) / tickSize));
+        const upward = zone.supply.price > zone.demand.price;
+        ctx.font = `bold ${14 * vRatio}px sans-serif`;
+        ctx.fillStyle = RR_TICKS_TEXT;
+        // Siempre a la IZQUIERDA de las líneas (el USD y los objetivos van a la derecha).
+        ctx.textAlign = 'right';
+        let ticksX = left - LABEL_GAP * hRatio;
+        // Cerca del borde derecho el USD pasa también a la izquierda: los ticks se apartan a su izquierda.
+        const usdText = zoneValueText(zone);
+        if (usdText !== null && right + LABEL_GAP * hRatio + ctx.measureText(usdText).width > ctx.canvas.width) {
+          ticksX -= ctx.measureText(usdText).width + 8 * hRatio;
+        }
+        if (upward) {
+          ctx.textBaseline = 'alphabetic';
+          ctx.fillText(ticksText, ticksX, Math.min(yd, ys) * vRatio - LABEL_RISE * vRatio);
+        } else {
+          ctx.textBaseline = 'hanging';
+          ctx.fillText(ticksText, ticksX, Math.max(yd, ys) * vRatio + LABEL_RISE * vRatio);
         }
       }
 
@@ -224,10 +257,10 @@
         const targetText = zoneValueText(zone, target.multiple);
         if (targetText === null) return;
         ctx.font = `bold ${14 * vRatio}px sans-serif`;
-        ctx.fillStyle = '#d1d4dc';
-        ctx.textBaseline = target.dir < 0 ? 'top' : 'bottom';
+        ctx.fillStyle = RR_PROFIT_TEXT;
+        ctx.textBaseline = target.dir < 0 ? 'hanging' : 'alphabetic';
         const targetX = labelX(ctx, targetText, left, right, hRatio);
-        ctx.fillText(targetText, targetX, y * vRatio + (target.dir < 0 ? 3 : -3) * vRatio);
+        ctx.fillText(targetText, targetX, y * vRatio + (target.dir < 0 ? LABEL_RISE : -LABEL_RISE) * vRatio);
       });
     }
 

@@ -28,7 +28,6 @@ public sealed class CandleChartPanel : UserControl
     private readonly ICandleFeed _feed;
     private readonly int _slot;
     private readonly string _symbol;
-    private readonly string _sessionLabel;
     private readonly decimal _tickSize;
     private readonly decimal _tickValue;
     private readonly CandleAggregator _aggregator;
@@ -49,7 +48,6 @@ public sealed class CandleChartPanel : UserControl
         _feed = feed;
         _slot = slot;
         _symbol = (settings.Symbol ?? "").Trim().ToUpperInvariant();
-        _sessionLabel = settings.RthOnly ? "RTH" : "24 h";
         _tickSize = settings.TickSize;
         _tickValue = settings.TickValue;
         _aggregator = new CandleAggregator(IntervalMinutes, settings.RthOnly);
@@ -57,12 +55,13 @@ public sealed class CandleChartPanel : UserControl
         _header.Name = $"lblChartStatus{slot}";
         _header.Dock = DockStyle.Top;
         _header.Height = 26;
-        _header.TextAlign = ContentAlignment.MiddleLeft;
-        _header.Padding = new Padding(8, 0, 0, 0);
+        _header.TextAlign = ContentAlignment.MiddleCenter;
         _header.Text = HasSymbol
-            ? $"{_symbol} · {IntervalMinutes} min {_sessionLabel} · iniciando..."
+            ? _symbol.TrimStart('/')   // solo el símbolo, sin la barra, centrado
             : $"Chart {slot} · sin símbolo (define Charts:Panels:{slot - 1}:Symbol en appsettings.json)";
-        _header.ForeColor = HasSymbol ? SystemColors.ControlText : SystemColors.GrayText;
+        // El fondo del panel es oscuro (como el gráfico): el texto va en el gris claro del tema.
+        _header.ForeColor = HasSymbol ? Color.FromArgb(0xD1, 0xD4, 0xDC) : Color.Silver;
+        _header.Font = new Font(Font, FontStyle.Bold);
 
         _webView.Name = $"chartWebView{slot}";
         _webView.Dock = DockStyle.Fill;
@@ -123,7 +122,6 @@ public sealed class CandleChartPanel : UserControl
             _feed.CandleReceived += OnCandleReceived;
             _feed.LevelOneTickReceived += OnLevelOneTickReceived;
             _feed.CandlesSnapshotReceived += ApplySnapshot;
-            _feed.ConnectionChanged += OnConnectionChanged;
             _feed.Start();
 
             // El hub manda los snapshots justo al conectar; si otro panel abrió la conexión antes
@@ -131,8 +129,6 @@ public sealed class CandleChartPanel : UserControl
             var cached = _feed.GetLastSnapshot(_symbol);
             if (cached is not null) ApplySnapshot(cached);
 
-            // Igual con el estado de conexión: si ya estaba conectado, el evento ya pasó.
-            if (_feed.LastConnectionState is { } state) OnConnectionChanged(state.Connected, state.Message);
         }
         catch (WebView2RuntimeNotFoundException)
         {
@@ -242,15 +238,6 @@ public sealed class CandleChartPanel : UserControl
         });
     }
 
-    private void OnConnectionChanged(bool connected, string message)
-    {
-        RunOnUiThread(() =>
-        {
-            _header.ForeColor = connected ? Color.SeaGreen : Color.Firebrick;
-            _header.Text = $"{_symbol} · {IntervalMinutes} min {_sessionLabel} · {message}";
-        });
-    }
-
     private void PushCandle(Candle candle)
     {
         var json = JsonSerializer.Serialize(ToChartPoint(candle));
@@ -302,7 +289,6 @@ public sealed class CandleChartPanel : UserControl
             _feed.CandleReceived -= OnCandleReceived;
             _feed.LevelOneTickReceived -= OnLevelOneTickReceived;
             _feed.CandlesSnapshotReceived -= ApplySnapshot;
-            _feed.ConnectionChanged -= OnConnectionChanged;
         }
 
         base.Dispose(disposing);
