@@ -69,11 +69,13 @@
     const BAR_SECONDS = 15 * 60;
     let lastBarTime = null;
     let barCount = 0;
+    let barTimes = [];   // tiempo de cada vela cargada, en orden (el índice coincide con el índice lógico del gráfico)
 
     function upsertCandle(candle) {
       if (lastBarTime === null || candle.time > lastBarTime) {
         lastBarTime = candle.time;
         barCount += 1;
+        barTimes.push(candle.time);
       }
       series.update(candle);
     }
@@ -90,6 +92,7 @@
       firstBarTime = candles.length > 0 ? candles[0].time : null;
       lastBarTime = candles.length > 0 ? candles[candles.length - 1].time : null;
       barCount = candles.length;
+      barTimes = candles.map(c => c.time);
       const count = candles.length;
       if (count > VISIBLE_BARS) {
         chart.timeScale().setVisibleLogicalRange({ from: count - VISIBLE_BARS, to: count + 6 });
@@ -97,6 +100,84 @@
         chart.timeScale().fitContent();
       }
     }
+
+    // ---- Sombreado fuera del horario regular (RTH) -------------------------------------------------
+    // Gris suave sobre lo que ocurre fuera de 9:30-16:00 ET (premarket, overnight, después del cierre y
+    // fines de semana). Los tiempos ya son hora de pared de Nueva York (ver arriba), así que la hora del
+    // día sale directo del timestamp. El horario regular no cambia: va como constantes.
+    const RTH_START_SECONDS = 9 * 3600 + 30 * 60;
+    const RTH_END_SECONDS = 16 * 3600;
+    const OUTSIDE_RTH_COLOR = 'rgba(149, 152, 161, 0.10)';
+
+    function isRegularHours(time) {
+      const day = new Date(time * 1000).getUTCDay();          // 0 = domingo ... 6 = sábado
+      if (day === 0 || day === 6) return false;
+      const secondsOfDay = time % 86400;
+      return secondsOfDay >= RTH_START_SECONDS && secondsOfDay < RTH_END_SECONDS;
+    }
+
+    // Tiempo de la vela con ese índice lógico; a la derecha de la última se extrapola en pasos de una vela.
+    function barTimeAt(index) {
+      if (index < barCount) return barTimes[index];
+      return lastBarTime + (index - (barCount - 1)) * BAR_SECONDS;
+    }
+
+    class SessionShadingPrimitive {
+      attached() {}
+      updateAllViews() {}
+      paneViews() {
+        return [{
+          zOrder() { return 'bottom'; },   // detrás de las velas y de las zonas
+          renderer() {
+            return {
+              draw(target) {
+                if (barCount === 0) return;
+                target.useBitmapCoordinateSpace(scope => {
+                  const timeScale = chart.timeScale();
+                  const range = timeScale.getVisibleLogicalRange();
+                  if (range === null) return;
+
+                  const ctx = scope.context;
+                  const hRatio = scope.horizontalPixelRatio;
+                  // Ancho real de una vela en pantalla (la opción barSpacing es solo el valor inicial: no sigue el zoom).
+                  const x0 = timeScale.logicalToCoordinate(0);
+                  const x1 = timeScale.logicalToCoordinate(1);
+                  const halfBar = (x0 !== null && x1 !== null ? Math.abs(x1 - x0) : timeScale.options().barSpacing) / 2;
+                  const from = Math.max(0, Math.floor(range.from) - 1);
+                  const to = Math.ceil(range.to) + 1;   // incluye el espacio libre a la derecha
+
+                  ctx.fillStyle = OUTSIDE_RTH_COLOR;
+                  let runStart = null;
+                  let runEnd = null;
+
+                  const flush = () => {
+                    if (runStart === null) return;
+                    const left = (runStart - halfBar) * hRatio;
+                    const right = (runEnd + halfBar) * hRatio;
+                    ctx.fillRect(left, 0, right - left, scope.bitmapSize.height);
+                    runStart = runEnd = null;
+                  };
+
+                  // Velas consecutivas fuera de RTH forman un solo rectángulo.
+                  for (let i = from; i <= to; i++) {
+                    const x = timeScale.logicalToCoordinate(i);
+                    if (x !== null && !isRegularHours(barTimeAt(i))) {
+                      if (runStart === null) runStart = x;
+                      runEnd = x;
+                    } else {
+                      flush();
+                    }
+                  }
+                  flush();
+                });
+              },
+            };
+          },
+        }];
+      }
+    }
+
+    series.attachPrimitive(new SessionShadingPrimitive());
 
     // ---- DZ/SZ: zonas de Demanda (verde) y Supply (roja) -------------------------------------
     // Con el modo armado, el 1er click dibuja la línea verde (Demanda) y fija el eje X de la zona;
